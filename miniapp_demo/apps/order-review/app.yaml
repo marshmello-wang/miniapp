@@ -1,0 +1,18 @@
+id: order-review
+name: 订单审核
+version: "1.0"
+description: 查看待审订单、一键批准(direct_action),并让 AI 分析风险(agent_action)。
+entry:
+  ui: assets/ui/index.html      # 默认/响应式入口(本示例一份 HTML 适配 PC 与移动)
+  # desktop: assets/ui/desktop.html   # 可选:PC 专属入口
+  # mobile: assets/ui/mobile.html     # 可选:移动专属入口
+scripts:
+  - name: list_orders
+    path: scripts/query.py
+    visibility: [agent, ui]
+  - name: approve_order
+    path: scripts/mutate.py
+    visibility: [agent, ui]
+skill:
+  content_file_path: SKILL.md
+  binding_tools: [bash, app_emit]

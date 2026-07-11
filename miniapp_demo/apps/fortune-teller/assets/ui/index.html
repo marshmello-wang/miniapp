@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>神秘占卜</title>
+  <script src="/sdk/oneagent.js"></script>
+  <style>
+    :root {
+      --ink: #ece7ff;
+      --muted: #9a93c7;
+      --gold: #e9c979;
+      --violet: #7c5cff;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: "Songti SC", "STSong", "PingFang SC", Georgia, serif;
+      color: var(--ink);
+      overflow: hidden;
+      background: radial-gradient(120% 90% at 50% -10%, #2a1b57 0%, #170f34 42%, #0a0718 100%);
+      display: flex; flex-direction: column;
+    }
+
+    /* ---- 主题背景层 ---- */
+    #themeBg { position: fixed; inset: 0; z-index: 0; opacity: 0; transition: opacity 1.5s ease; pointer-events: none; }
+
+    /* ---- 星空层 ---- */
+    #sky { position: fixed; inset: 0; z-index: 0; }
+    .nebula { position: fixed; z-index: 0; border-radius: 50%; filter: blur(60px); opacity: .5; pointer-events: none; animation: drift 26s ease-in-out infinite alternate; transition: background 1.5s ease; }
+    .nebula.a { width: 60vmax; height: 60vmax; left: -18vmax; top: -20vmax; background: radial-gradient(circle, rgba(124,92,255,.55), transparent 60%); }
+    .nebula.b { width: 46vmax; height: 46vmax; right: -14vmax; bottom: -16vmax; background: radial-gradient(circle, rgba(233,201,121,.28), transparent 60%); animation-duration: 32s; }
+    @keyframes drift { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(3vmax,4vmax,0) scale(1.12); } }
+
+    /* ---- 中央舞台 ---- */
+    .stage {
+      position: relative; z-index: 2; flex: 1;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 40px 24px 16px; text-align: center; overflow-y: auto;
+    }
+    .orb {
+      position: absolute; width: 320px; height: 320px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(124,92,255,.35), rgba(124,92,255,0) 65%);
+      filter: blur(6px); animation: breathe 6s ease-in-out infinite; pointer-events: none;
+      transition: background 1.5s ease;
+    }
+    @keyframes breathe { 0%,100% { transform: scale(.92); opacity: .55; } 50% { transform: scale(1.08); opacity: .95; } }
+
+    /* ---- IDLE 态: oracle 文字 ---- */
+    .oracle {
+      position: relative; max-width: 640px; font-size: 26px; line-height: 2.05; letter-spacing: .06em;
+      color: #efe9ff; text-shadow: 0 0 28px rgba(124,92,255,.35), 0 0 12px rgba(233,201,121,.18);
+      opacity: 0; transform: translateY(8px); filter: blur(6px);
+      transition: opacity 1.8s ease, transform 1.8s ease, filter 1.8s ease;
+      min-height: 2em; white-space: pre-wrap;
+    }
+    .oracle.show { opacity: 1; transform: translateY(0); filter: blur(0); }
+    .oracle .ch { display: inline-block; opacity: 0; will-change: opacity, filter, transform; animation: emerge 2.1s cubic-bezier(.22,.61,.28,1) forwards; }
+    @keyframes emerge {
+      0%   { opacity: 0; filter: blur(16px); transform: translateY(6px) scale(1.06); }
+      55%  { opacity: .45; filter: blur(5px); }
+      100% { opacity: 1; filter: blur(0); transform: translateY(0) scale(1); }
+    }
+    .oracle .caret { display: inline-block; width: .5ch; margin-left: 2px; color: var(--gold); opacity: .8; animation: caretGlow 2.4s ease-in-out infinite; }
+    @keyframes caretGlow { 0%,100% { opacity: .25; text-shadow: 0 0 6px rgba(233,201,121,.4); } 50% { opacity: .95; text-shadow: 0 0 16px rgba(233,201,121,.9); } }
+    .hint { position: relative; z-index: 2; color: var(--muted); font-size: 14px; letter-spacing: .18em; opacity: .8; margin-top: 10px; transition: opacity .5s ease; }
+    .hint.gone { opacity: 0; pointer-events: none; }
+
+    /* ---- Loading 动画 ---- */
+    .loading { position: relative; z-index: 2; display: none; flex-direction: column; align-items: center; gap: 16px; }
+    .loading.on { display: flex; }
+    .loading-dots { display: flex; gap: 8px; }
+    .loading-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); opacity: .3; animation: dotPulse 1.4s ease-in-out infinite; }
+    .loading-dots i:nth-child(2) { animation-delay: .2s; }
+    .loading-dots i:nth-child(3) { animation-delay: .4s; }
+    @keyframes dotPulse { 0%,80%,100% { opacity: .3; transform: scale(.8); } 40% { opacity: 1; transform: scale(1.2); } }
+    .loading-text { color: var(--muted); font-size: 14px; letter-spacing: .18em; }
+
+    /* ---- QUESTION 态 ---- */
+    .q-card {
+      position: relative; max-width: 520px; width: 100%;
+      opacity: 0; transform: translateY(16px); filter: blur(8px);
+      transition: opacity .9s ease, transform .9s ease, filter .9s ease;
+    }
+    .q-card.show { opacity: 1; transform: translateY(0); filter: blur(0); }
+    .q-text {
+      font-size: 22px; line-height: 1.9; letter-spacing: .05em; margin-bottom: 24px;
+      color: var(--ink); text-shadow: 0 0 20px rgba(124,92,255,.25);
+    }
+    .q-options { display: flex; flex-direction: column; gap: 12px; width: 100%; }
+    .q-opt {
+      padding: 14px 20px; border-radius: 16px; border: 1px solid rgba(201,182,255,.2);
+      background: rgba(255,255,255,.05); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      color: var(--ink); font-size: 17px; letter-spacing: .04em; cursor: pointer;
+      transition: background .2s ease, border-color .2s ease, box-shadow .2s ease, transform .12s ease;
+      text-align: left;
+    }
+    .q-opt:hover { background: rgba(124,92,255,.15); border-color: rgba(124,92,255,.45); box-shadow: 0 0 20px rgba(124,92,255,.2); }
+    .q-opt:active { transform: scale(.97); }
+    .q-opt.picked { background: rgba(124,92,255,.28); border-color: var(--violet); box-shadow: 0 0 24px rgba(124,92,255,.35); pointer-events: none; }
+
+    /* ---- RESULT 态 ---- */
+    .r-card {
+      position: relative; max-width: 480px; width: 100%;
+      background: rgba(20,14,45,.7); border: 1px solid rgba(201,182,255,.18);
+      border-radius: 24px; padding: 32px 28px 28px; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      box-shadow: 0 20px 60px rgba(10,7,24,.6), inset 0 1px 0 rgba(255,255,255,.06);
+      opacity: 0; transform: translateY(20px) scale(.97); filter: blur(6px);
+      transition: opacity 1.2s ease, transform 1.2s ease, filter 1.2s ease;
+    }
+    .r-card.show { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+    .r-title { font-size: 14px; color: var(--muted); letter-spacing: .2em; text-transform: uppercase; margin-bottom: 10px; }
+    .r-verdict {
+      font-size: 36px; letter-spacing: .12em; margin-bottom: 16px;
+      background: linear-gradient(120deg, #fff 0%, var(--gold) 50%, #c9b6ff 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+      text-shadow: none;
+    }
+    .r-summary { font-size: 17px; line-height: 1.9; color: rgba(236,231,255,.85); margin-bottom: 22px; }
+    .r-details { display: flex; flex-direction: column; gap: 14px; margin-bottom: 22px; }
+    .r-detail { display: flex; gap: 12px; align-items: flex-start; }
+    .r-label { flex: 0 0 auto; font-size: 13px; color: var(--gold); letter-spacing: .08em; padding-top: 3px; white-space: nowrap; }
+    .r-label::before { content: '✦ '; opacity: .6; }
+    .r-dtxt { font-size: 16px; line-height: 1.8; color: rgba(236,231,255,.8); }
+    .r-lucky { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 4px; }
+    .r-tag { padding: 6px 14px; border-radius: 999px; border: 1px solid rgba(233,201,121,.25); background: rgba(233,201,121,.08); font-size: 13px; color: var(--gold); letter-spacing: .08em; }
+    .r-again {
+      margin-top: 24px; padding: 13px 28px; border-radius: 999px; border: 1px solid rgba(201,182,255,.25);
+      background: rgba(255,255,255,.06); color: var(--ink); font-size: 15px; letter-spacing: .1em; cursor: pointer;
+      transition: background .2s ease, border-color .2s ease;
+    }
+    .r-again:hover { background: rgba(124,92,255,.15); border-color: rgba(124,92,255,.4); }
+
+    /* ---- 底部输入 ---- */
+    .dock { position: relative; z-index: 3; padding: 16px clamp(14px, 5vw, 40px) calc(20px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 12px; }
+    .dock.hidden { display: none; }
+    .combar { position: relative; flex: 1; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 12px 8px 20px; background: rgba(255,255,255,.06); border: 1px solid rgba(201,182,255,.22); border-radius: 999px; cursor: text; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: 0 10px 40px rgba(10,7,24,.5), inset 0 1px 0 rgba(255,255,255,.06); transition: background .2s ease, border-color .2s ease, transform .12s ease; }
+    .combar input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--ink); font-size: 16px; font-family: inherit; letter-spacing: .03em; }
+    .combar input::placeholder { color: rgba(154,147,199,.7); }
+    .combar.voice { background: rgba(255,92,124,.16); border-color: rgba(255,92,124,.45); transform: scale(1.01); animation: barpulse 1.3s ease-in-out infinite; cursor: default; }
+    .combar.voice input { display: none; }
+    .combar .voice-label { display: none; flex: 1; text-align: center; letter-spacing: .18em; color: #ffd7de; font-size: 15px; }
+    .combar.voice .voice-label { display: block; }
+    .combar.voice.cancel { background: rgba(120,120,140,.18); border-color: rgba(180,180,200,.4); animation: none; }
+    .combar.voice.cancel .voice-label { color: #cfc9e6; }
+    @keyframes barpulse { 0%,100% { box-shadow: 0 10px 40px rgba(10,7,24,.5), 0 0 0 0 rgba(255,92,124,.4); } 50% { box-shadow: 0 10px 40px rgba(10,7,24,.5), 0 0 0 10px rgba(255,92,124,0); } }
+    .bar-icon { flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--gold); background: transparent; transition: color .2s ease, background .2s ease, transform .12s ease; }
+    .bar-icon svg { width: 22px; height: 22px; }
+    .bar-icon.send { color: #fff; background: linear-gradient(135deg,#9a7dff,#7c5cff); box-shadow: 0 6px 16px rgba(124,92,255,.45); }
+    .bar-icon:active { transform: scale(.9); }
+    .combar.voice .bar-icon { display: none; }
+    .press-layer { position: absolute; inset: 0; border-radius: 999px; z-index: 3; touch-action: none; }
+    .press-layer.off { display: none; }
+
+    /* 录音浮层 */
+    .rec-veil { position: fixed; inset: 0; z-index: 5; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 22px; background: radial-gradient(circle at 50% 60%, rgba(23,15,52,.6), rgba(10,7,24,.85)); backdrop-filter: blur(4px); color: var(--ink); }
+    .rec-veil.on { display: flex; }
+    .waves { display: flex; align-items: center; gap: 6px; height: 60px; }
+    .waves i { width: 5px; height: 14px; border-radius: 3px; background: linear-gradient(#f4dd9a,#ff5c7c); animation: wave 1s ease-in-out infinite; }
+    .waves i:nth-child(2){animation-delay:.1s} .waves i:nth-child(3){animation-delay:.2s}
+    .waves i:nth-child(4){animation-delay:.3s} .waves i:nth-child(5){animation-delay:.4s}
+    .waves i:nth-child(6){animation-delay:.5s} .waves i:nth-child(7){animation-delay:.6s}
+    @keyframes wave { 0%,100%{ transform: scaleY(.5);} 50%{ transform: scaleY(2.6);} }
+    .rec-veil .tip { letter-spacing: .2em; color: var(--muted); font-size: 14px; }
+
+    .toast { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 6; background: rgba(30,20,60,.9); color: var(--ink); border: 1px solid rgba(201,182,255,.25); padding: 10px 18px; border-radius: 999px; font-size: 13px; letter-spacing: .08em; opacity: 0; transition: opacity .3s ease; pointer-events: none; max-width: 80vw; text-align: center; }
+    .toast.on { opacity: 1; }
+
+    @media (max-width: 480px) {
+      .oracle { font-size: 21px; line-height: 1.9; }
+      .orb { width: 240px; height: 240px; }
+      .q-text { font-size: 19px; }
+      .r-verdict { font-size: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="themeBg"></div>
+  <canvas id="sky"></canvas>
+  <div class="nebula a" id="nebulaA"></div>
+  <div class="nebula b" id="nebulaB"></div>
+
+  <div class="stage" id="stage">
+    <div class="orb"></div>
+    <!-- IDLE 态 -->
+    <div id="viewIdle">
+      <div class="oracle" id="oracle"></div>
+      <div class="hint" id="hint">今夜星象微动 · 说说最近发生了什么</div>
+      <div class="loading" id="loading">
+        <div class="loading-dots"><i></i><i></i><i></i></div>
+        <div class="loading-text">星象推演中…</div>
+      </div>
+    </div>
+    <!-- QUESTION 态 -->
+    <div id="viewQuestion" style="display:none">
+      <div class="q-card" id="qCard">
+        <div class="q-text" id="qText"></div>
+        <div class="q-options" id="qOptions"></div>
+      </div>
+    </div>
+    <!-- RESULT 态 -->
+    <div id="viewResult" style="display:none">
+      <div class="r-card" id="rCard">
+        <div class="r-title" id="rTitle"></div>
+        <div class="r-verdict" id="rVerdict"></div>
+        <div class="r-summary" id="rSummary"></div>
+        <div class="r-details" id="rDetails"></div>
+        <div class="r-lucky" id="rLucky"></div>
+        <button class="r-again" id="rAgain">再来一卦</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="dock" id="dock">
+    <div class="combar" id="combar">
+      <input id="q" type="text" placeholder="轻触打字或长按语音，说出你的困惑…" autocomplete="off" enterkeyhint="send" />
+      <span class="voice-label" id="voiceLabel">松开发送</span>
+      <button class="bar-icon" id="barIcon" tabindex="-1" aria-label="发送" style="display:none">
+        <svg id="iconSend" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="19" x2="12" y2="5"></line>
+          <polyline points="6 11 12 5 18 11"></polyline>
+        </svg>
+      </button>
+      <div class="press-layer" id="pressLayer"></div>
+    </div>
+  </div>
+
+  <div class="rec-veil" id="veil">
+    <div class="waves"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="tip" id="veilTip">聆听中 · 松开发送 · 上滑取消</div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ========== 星空 ==========
+    (function stars() {
+      var c = document.getElementById('sky'), ctx = c.getContext('2d'), pts = [];
+      function resize() {
+        c.width = innerWidth; c.height = innerHeight;
+        var n = Math.round((innerWidth * innerHeight) / 6500); pts = [];
+        for (var i = 0; i < n; i++) pts.push({ x: Math.random() * c.width, y: Math.random() * c.height, r: Math.random() * 1.4 + .3, a: Math.random(), s: Math.random() * .015 + .004 });
+      }
+      function frame() {
+        ctx.clearRect(0, 0, c.width, c.height);
+        for (var i = 0; i < pts.length; i++) { var p = pts[i]; p.a += p.s; var tw = (Math.sin(p.a) + 1) / 2; ctx.globalAlpha = 0.15 + tw * 0.85; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.283); ctx.fillStyle = tw > .75 ? '#f6e6b8' : '#dcd6ff'; ctx.fill(); }
+        requestAnimationFrame(frame);
+      }
+      addEventListener('resize', resize); resize(); frame();
+    })();
+
+    // ========== 元素 ==========
+    var themeBg = document.getElementById('themeBg');
+    var nebulaA = document.getElementById('nebulaA');
+    var nebulaB = document.getElementById('nebulaB');
+    var orbEl = document.querySelector('.orb');
+    var oracle = document.getElementById('oracle');
+    var hint = document.getElementById('hint');
+    var loadingEl = document.getElementById('loading');
+    var input = document.getElementById('q');
+    var combar = document.getElementById('combar');
+    var pressLayer = document.getElementById('pressLayer');
+    var barIcon = document.getElementById('barIcon');
+    var iconSend = document.getElementById('iconSend');
+    var veil = document.getElementById('veil');
+    var veilTip = document.getElementById('veilTip');
+    var toastEl = document.getElementById('toast');
+    var dock = document.getElementById('dock');
+
+    var viewIdle = document.getElementById('viewIdle');
+    var viewQuestion = document.getElementById('viewQuestion');
+    var viewResult = document.getElementById('viewResult');
+    var qCard = document.getElementById('qCard');
+    var qText = document.getElementById('qText');
+    var qOptions = document.getElementById('qOptions');
+    var rCard = document.getElementById('rCard');
+    var rTitle = document.getElementById('rTitle');
+    var rVerdict = document.getElementById('rVerdict');
+    var rSummary = document.getElementById('rSummary');
+    var rDetails = document.getElementById('rDetails');
+    var rLucky = document.getElementById('rLucky');
+    var rAgain = document.getElementById('rAgain');
+
+    var busy = false;
+    var toastTimer;
+    var currentPhase = 'idle'; // 'idle' | 'question' | 'result'
+    var currentQuestion = null;
+
+    function toast(msg) {
+      toastEl.textContent = msg; toastEl.classList.add('on');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () { toastEl.classList.remove('on'); }, 2600);
+    }
+
+    // ========== 视图切换 ==========
+    function showView(phase) {
+      currentPhase = phase;
+      viewIdle.style.display = phase === 'idle' ? '' : 'none';
+      viewQuestion.style.display = phase === 'question' ? '' : 'none';
+      viewResult.style.display = phase === 'result' ? '' : 'none';
+      if (phase === 'result') { dock.classList.add('hidden'); }
+      else { dock.classList.remove('hidden'); }
+    }
+
+    // ========== IDLE 态: oracle 渐显文字 ==========
+    var charQueue = [], dripTimer = null, charIdx = 0, oracleDone = false;
+    var DRIP_MS = 50;
+
+    function beginOracle() {
+      hint.classList.add('gone');
+      oracle.classList.remove('show'); oracle.textContent = '';
+      void oracle.offsetWidth;
+      oracle.innerHTML = '<span class="body"></span><span class="caret">✦</span>';
+      oracle.classList.add('show');
+      charQueue = []; charIdx = 0; oracleDone = false;
+      clearInterval(dripTimer);
+      dripTimer = setInterval(dripOne, DRIP_MS);
+    }
+    function colorFor(i) {
+      var t = (Math.sin(i * 0.11) + 1) / 2;
+      var gold = [240, 214, 150], lilac = [201, 182, 255];
+      return 'rgb(' + Math.round(gold[0] + (lilac[0] - gold[0]) * t) + ',' + Math.round(gold[1] + (lilac[1] - gold[1]) * t) + ',' + Math.round(gold[2] + (lilac[2] - gold[2]) * t) + ')';
+    }
+    function dripOne() {
+      if (charQueue.length === 0) { if (oracleDone) { clearInterval(dripTimer); dripTimer = null; finishReveal(); } return; }
+      var ch = charQueue.shift();
+      var body = oracle.querySelector('.body');
+      if (!body) return;
+      if (ch === ' ' || ch === '\n' || ch === '\t') { body.appendChild(document.createTextNode(ch)); if (charQueue.length) dripOne(); return; }
+      var span = document.createElement('span'); span.className = 'ch'; span.textContent = ch; span.style.color = colorFor(charIdx);
+      body.appendChild(span); charIdx++;
+    }
+    function appendOracle(delta) { var chars = Array.from(delta); for (var i = 0; i < chars.length; i++) charQueue.push(chars[i]); }
+    function endOracle() { oracleDone = true; if (charQueue.length === 0 && !dripTimer) finishReveal(); }
+    function finishReveal() {
+      var caret = oracle.querySelector('.caret'); if (caret) caret.remove();
+      var body = oracle.querySelector('.body');
+      if (!body || !body.textContent.trim()) {
+        if (body) { body.innerHTML = ''; charIdx = 0; var fb = '星象一时晦暗……再问一次吧。'; for (var i = 0; i < fb.length; i++) charQueue.push(fb[i]); oracleDone = false; dripTimer = setInterval(dripOne, DRIP_MS); setTimeout(function () { oracleDone = true; }, fb.length * DRIP_MS + 100); }
+        oracle.classList.add('show');
+      }
+    }
+
+    // ========== QUESTION 态 ==========
+    function renderQuestion(q) {
+      currentQuestion = q;
+      qCard.classList.remove('show');
+      qText.textContent = q.text;
+      qOptions.innerHTML = '';
+
+      if (q.type === 'choice' && q.options && q.options.length) {
+        for (var i = 0; i < q.options.length; i++) {
+          (function (optText, idx) {
+            var btn = document.createElement('button');
+            btn.className = 'q-opt';
+            btn.textContent = optText;
+            btn.onclick = function () {
+              btn.classList.add('picked');
+              // 禁用所有选项
+              var all = qOptions.querySelectorAll('.q-opt');
+              for (var j = 0; j < all.length; j++) all[j].style.pointerEvents = 'none';
+              ask(optText);
+            };
+            qOptions.appendChild(btn);
+          })(q.options[i], i);
+        }
+      }
+
+      showView('question');
+      void qCard.offsetWidth;
+      qCard.classList.add('show');
+    }
+
+    // ========== RESULT 态 ==========
+    function renderResult(r) {
+      rCard.classList.remove('show');
+      rTitle.textContent = r.title || '占卜结果';
+      rVerdict.textContent = r.verdict || '——';
+      rSummary.textContent = r.summary || '';
+
+      rDetails.innerHTML = '';
+      if (r.details && r.details.length) {
+        for (var i = 0; i < r.details.length; i++) {
+          var row = document.createElement('div'); row.className = 'r-detail';
+          var lbl = document.createElement('div'); lbl.className = 'r-label'; lbl.textContent = r.details[i].label;
+          var txt = document.createElement('div'); txt.className = 'r-dtxt'; txt.textContent = r.details[i].text;
+          row.appendChild(lbl); row.appendChild(txt);
+          rDetails.appendChild(row);
+        }
+      }
+
+      rLucky.innerHTML = '';
+      if (r.lucky) {
+        var keys = Object.keys(r.lucky);
+        var labels = { color: '幸运色', number: '幸运数', direction: '方位' };
+        for (var k = 0; k < keys.length; k++) {
+          var tag = document.createElement('span'); tag.className = 'r-tag';
+          tag.textContent = (labels[keys[k]] || keys[k]) + ' · ' + r.lucky[keys[k]];
+          rLucky.appendChild(tag);
+        }
+      }
+
+      showView('result');
+      void rCard.offsetWidth;
+      rCard.classList.add('show');
+    }
+
+    rAgain.onclick = function () { resetToIdle(); };
+
+    function resetToIdle() {
+      currentQuestion = null;
+      oracle.classList.remove('show'); oracle.textContent = '';
+      hint.classList.remove('gone');
+      hint.textContent = '今夜星象微动 · 说说最近发生了什么';
+      resetThemeBg();
+      showView('idle');
+    }
+
+    // ========== onUiUpdate: 由 agent 的 app_emit / show_question CLI 驱动 ==========
+    // ========== 主题背景切换 ==========
+    var _defaultNebulaA = 'radial-gradient(circle, rgba(124,92,255,.55), transparent 60%)';
+    var _defaultNebulaB = 'radial-gradient(circle, rgba(233,201,121,.28), transparent 60%)';
+    var _defaultOrb = 'radial-gradient(circle, rgba(124,92,255,.35), rgba(124,92,255,0) 65%)';
+
+    function applyThemeBg(bg) {
+      if (!bg) return;
+      if (bg.gradient) { themeBg.style.background = bg.gradient; themeBg.style.opacity = '1'; }
+      if (bg.nebulaA) nebulaA.style.background = 'radial-gradient(circle, ' + bg.nebulaA + ', transparent 60%)';
+      if (bg.nebulaB) nebulaB.style.background = 'radial-gradient(circle, ' + bg.nebulaB + ', transparent 60%)';
+      if (bg.orbColor) orbEl.style.background = 'radial-gradient(circle, ' + bg.orbColor + ', ' + bg.orbColor.replace(/[\d.]+\)$/, '0)') + ' 65%)';
+    }
+    function resetThemeBg() {
+      themeBg.style.opacity = '0';
+      nebulaA.style.background = _defaultNebulaA;
+      nebulaB.style.background = _defaultNebulaB;
+      orbEl.style.background = _defaultOrb;
+    }
+
+    oneagent.onUiUpdate(function (e) {
+      var sc = (e.payload && e.payload.structuredContent) || {};
+      var phase = sc.phase;
+      hideLoading();
+      if (phase === 'theme_enter' && sc.background) {
+        applyThemeBg(sc.background);
+      } else if (phase === 'question' && sc.question) {
+        renderQuestion(sc.question);
+      } else if (phase === 'result' && sc.result) {
+        renderResult(sc.result);
+      }
+    });
+
+    // ========== ask: 发送 agentAction ==========
+    function showLoading() { hint.classList.add('gone'); loadingEl.classList.add('on'); }
+    function hideLoading() { loadingEl.classList.remove('on'); }
+
+    function ask(text) {
+      text = (text || '').trim();
+      if (!text || busy) return;
+      busy = true;
+      input.value = '';
+
+      var oracleStarted = false;
+      var got = false;
+      showView('idle');
+      showLoading();
+
+      oneagent.agentAction(text, { phase: currentPhase }, {
+        onTrajectory: function (e) {
+          if (e.type === 'text' && e.payload && e.payload.delta) {
+            got = true;
+            if (!oracleStarted) {
+              oracleStarted = true;
+              hideLoading();
+              beginOracle();
+            }
+            appendOracle(e.payload.delta);
+          }
+        },
+        onDone: function () {
+          busy = false;
+          hideLoading();
+          if (oracleStarted) { endOracle(); if (!got) endOracle(); }
+        }
+      });
+    }
+
+    // ========== 打字态 / 空闲态切换 ==========
+    function enterTyping() { pressLayer.classList.add('off'); input.focus(); }
+    function leaveTyping() { if (recording) return; if (!input.value.trim()) pressLayer.classList.remove('off'); }
+    input.addEventListener('blur', leaveTyping);
+    input.addEventListener('input', refreshIcon);
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitText(); } });
+
+    function submitText() { ask(input.value); input.blur(); pressLayer.classList.remove('off'); refreshIcon(); }
+    function refreshIcon() {
+      var hasText = !!input.value.trim();
+      barIcon.style.display = hasText ? '' : 'none';
+      barIcon.classList.toggle('send', hasText);
+    }
+    barIcon.addEventListener('click', function (e) { e.preventDefault(); if (input.value.trim()) submitText(); });
+
+    // ========== 语音录制 ==========
+    var mediaRecorder = null, chunks = [], stream = null, recording = false;
+    var voiceCancelled = false, pendingStop = false;
+
+    function startRecording() {
+      if (busy || recording) return;
+      if (!navigator.mediaDevices || !window.MediaRecorder) { toast('此环境不支持录音'); return; }
+      pendingStop = false;
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(function (s) {
+        stream = s; chunks = [];
+        mediaRecorder = new MediaRecorder(s);
+        mediaRecorder.ondataavailable = function (ev) { if (ev.data.size) chunks.push(ev.data); };
+        mediaRecorder.onstop = function () {
+          if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+          if (voiceCancelled) { chunks = []; return; }
+          var blob = new Blob(chunks, { type: (mediaRecorder && mediaRecorder.mimeType) || 'audio/webm' });
+          transcribe(blob);
+        };
+        recording = true; combar.classList.add('voice'); veil.classList.add('on');
+        mediaRecorder.start();
+        if (pendingStop) { pendingStop = false; finishRecording(); }
+      }).catch(function () { pendingStop = false; combar.classList.remove('voice'); veil.classList.remove('on'); toast('无法获取麦克风权限'); });
+    }
+    function finishRecording() { combar.classList.remove('voice', 'cancel'); veil.classList.remove('on'); if (recording && mediaRecorder && mediaRecorder.state !== 'inactive') { recording = false; try { mediaRecorder.stop(); } catch (e) {} } }
+    function setCancelState(on) { combar.classList.toggle('cancel', on); veilTip.textContent = on ? '松开手指 · 取消发送' : '聆听中 · 松开发送 · 上滑取消'; }
+    function transcribe(blob) {
+      if (!blob || !blob.size) return;
+      toast('聆听你的话语……');
+      oneagent.transcribe(blob, 'voice.webm').then(function (text) {
+        text = (text || '').trim(); if (!text) { toast('没有听清，请再说一次'); return; }
+        ask(text);
+      }).catch(function (err) { toast((err && err.message) ? String(err.message) : '语音识别失败'); });
+    }
+
+    // ========== 捕获层: 轻触打字 vs 长按说话 ==========
+    var pressTimer = null, pressStartY = 0, longPressed = false;
+    var LONG_PRESS_MS = 260, CANCEL_DY = 70;
+    function onPressDown(e) { e.preventDefault(); var pt = e.touches ? e.touches[0] : e; pressStartY = pt.clientY; longPressed = false; pressTimer = setTimeout(function () { longPressed = true; startRecording(); }, LONG_PRESS_MS); document.addEventListener('mousemove', onPressMove); document.addEventListener('mouseup', onPressUp); }
+    function onPressMove(e) { if (!recording) return; var pt = e.touches ? e.touches[0] : e; setCancelState((pressStartY - pt.clientY) > CANCEL_DY); }
+    function onPressUp(e) { if (e && e.cancelable) e.preventDefault(); clearTimeout(pressTimer); document.removeEventListener('mousemove', onPressMove); document.removeEventListener('mouseup', onPressUp); if (longPressed) { voiceCancelled = combar.classList.contains('cancel'); if (recording) finishRecording(); else pendingStop = true; } else { enterTyping(); } }
+    pressLayer.addEventListener('mousedown', onPressDown);
+    pressLayer.addEventListener('touchstart', onPressDown, { passive: false });
+    pressLayer.addEventListener('touchmove', onPressMove, { passive: false });
+    pressLayer.addEventListener('touchend', onPressUp, { passive: false });
+    pressLayer.addEventListener('touchcancel', onPressUp, { passive: false });
+
+    refreshIcon();
+    showView('idle');
+
+    oneagent.setEnv(function () {
+      return { app: 'fortune-teller', phase: currentPhase };
+    });
+  </script>
+</body>
+</html>

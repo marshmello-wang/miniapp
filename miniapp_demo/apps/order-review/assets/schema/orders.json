@@ -1,0 +1,9 @@
+{
+  "orders": [
+    { "id": "O-1001", "customer": "Acme 工业", "amount": 128000, "risk": "high", "status": "pending" },
+    { "id": "O-1002", "customer": "Beta 商贸", "amount": 320, "risk": "low", "status": "pending" },
+    { "id": "O-1003", "customer": "Cyber 科技", "amount": 8800, "risk": "medium", "status": "pending" },
+    { "id": "O-1004", "customer": "Delta 物流", "amount": 45000, "risk": "high", "status": "pending" },
+    { "id": "O-1005", "customer": "Echo 传媒", "amount": 1500, "risk": "low", "status": "approved" }
+  ]
+}

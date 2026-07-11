@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>订单审核</title>
+  <script src="/sdk/oneagent.js"></script>
+  <style>
+    :root {
+      --ink: #0b1120; --muted: #64748b; --line: #eceff4; --accent: #4f46e5;
+      --accent-grad: linear-gradient(135deg, #6366f1, #8b5cf6);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+        "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      margin: 0; padding: 28px 30px; color: var(--ink);
+      background:
+        radial-gradient(700px 380px at 100% -5%, rgba(124, 58, 237, 0.07), transparent 60%),
+        radial-gradient(600px 360px at -5% 0%, rgba(14, 165, 233, 0.06), transparent 55%),
+        #f7f8fb;
+      -webkit-font-smoothing: antialiased;
+    }
+    .head { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+    .head .logo {
+      width: 42px; height: 42px; border-radius: 12px; background: var(--accent-grad);
+      display: flex; align-items: center; justify-content: center; color: #fff; font-size: 20px;
+      box-shadow: 0 8px 20px rgba(124, 58, 237, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+    h1 { font-size: 20px; margin: 0; letter-spacing: -0.02em; }
+    .subtitle { color: var(--muted); font-size: 13px; margin-top: 3px; }
+
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+    .stat {
+      background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 6px 16px rgba(16, 24, 40, 0.05);
+      position: relative; overflow: hidden;
+    }
+    .stat::after {
+      content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent-grad);
+      opacity: 0.9;
+    }
+    .stat .k { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+    .stat .v { font-size: 24px; font-weight: 750; margin-top: 6px; letter-spacing: -0.02em; }
+
+    .card {
+      background: #fff; border: 1px solid var(--line); border-radius: 16px; overflow: hidden;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 10px 28px rgba(16, 24, 40, 0.06);
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 14px 18px; font-size: 14px; }
+    th {
+      background: #fbfcfe; color: #64748b; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--line);
+    }
+    tbody tr { border-bottom: 1px solid #f2f4f8; transition: background 0.12s ease; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #fafbff; }
+    td .id { font-weight: 650; font-variant-numeric: tabular-nums; }
+    td .amt { font-weight: 650; font-variant-numeric: tabular-nums; }
+
+    .risk { font-size: 11.5px; padding: 3px 10px; border-radius: 999px; font-weight: 700; letter-spacing: 0.02em; }
+    .risk.high { background: #fef2f2; color: #dc2626; box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.15); }
+    .risk.medium { background: #fffbeb; color: #d97706; box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.15); }
+    .risk.low { background: #f0fdf4; color: #16a34a; box-shadow: inset 0 0 0 1px rgba(22, 163, 74, 0.15); }
+    .status { font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; color: #64748b; }
+    .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
+    .status.pending::before { background: #f59e0b; }
+    .status.approved { color: #16a34a; font-weight: 600; }
+    .status.approved::before { background: #16a34a; }
+
+    #rows button {
+      padding: 6px 14px; border-radius: 9px; border: none; cursor: pointer; font-weight: 600; font-size: 13px;
+      background: var(--accent-grad); color: #fff;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      transition: filter 0.15s ease, transform 0.1s ease;
+    }
+    #rows button:hover { filter: brightness(1.06); }
+    #rows button:active { transform: translateY(0.5px); }
+    #rows button:disabled { opacity: 0.5; cursor: default; }
+
+    .ai { margin-top: 22px; }
+    .ai .card { padding: 18px; }
+    .ai-title { font-size: 13px; font-weight: 700; color: #334155; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .ai-title .spark {
+      width: 22px; height: 22px; border-radius: 7px; background: var(--accent-grad); color: #fff;
+      display: inline-flex; align-items: center; justify-content: center; font-size: 12px;
+      box-shadow: 0 3px 8px rgba(124, 58, 237, 0.35);
+    }
+    .ai-row { display: flex; gap: 10px; margin-bottom: 14px; }
+    .ai-row input {
+      flex: 1; padding: 11px 14px; border: 1px solid #dbe1ea; border-radius: 11px; outline: none;
+      transition: border 0.15s ease, box-shadow 0.15s ease;
+    }
+    .ai-row input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25); }
+    .ai-row button {
+      padding: 11px 20px; border-radius: 11px; border: none; cursor: pointer; font-weight: 650; color: #fff;
+      background: var(--accent-grad);
+      box-shadow: 0 6px 16px rgba(99, 102, 241, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      transition: filter 0.15s ease;
+    }
+    .ai-row button:hover { filter: brightness(1.06); }
+    .analysis {
+      white-space: pre-wrap; background: #f8fafc; border: 1px solid var(--line); border-radius: 12px;
+      padding: 14px 16px; min-height: 28px; font-size: 14px; line-height: 1.65; color: #1e293b;
+    }
+    .traj {
+      margin-top: 14px; font-size: 12px; color: #94a3b8; white-space: pre-wrap; max-height: 180px; overflow: auto;
+      background: #0b1020; color: #a5b4fc; border-radius: 12px; padding: 12px 14px; line-height: 1.6;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace; display: none;
+    }
+    .traj.show { display: block; }
+
+    .dev-badge {
+      font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; margin-left: 8px;
+      background: #eef2ff; color: #4f46e5; vertical-align: middle; letter-spacing: 0.02em;
+    }
+
+    /* ---------- 响应式:同一份 UI 适配移动端 ---------- */
+    @media (max-width: 560px) {
+      body { padding: 18px 16px; }
+      .head { margin-bottom: 16px; gap: 10px; }
+      .head .logo { width: 38px; height: 38px; font-size: 18px; }
+      h1 { font-size: 17px; }
+      .subtitle { font-size: 12px; }
+      .stats { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+      .stat { padding: 12px 14px; border-radius: 12px; }
+      .stat .v { font-size: 20px; }
+      th, td { padding: 11px 12px; font-size: 13px; }
+      /* 移动端隐藏“客户”列以保证信息密度 */
+      th:nth-child(2), td:nth-child(2) { display: none; }
+      .ai .card { padding: 14px; }
+      .ai-row { flex-direction: column; }
+      .ai-row button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <div class="logo">🧾</div>
+    <div>
+      <h1>订单审核 <span class="dev-badge" id="dev">desktop</span></h1>
+      <div class="subtitle">direct_action 一键批准 · agent_action 让 AI 分析风险</div>
+    </div>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr><th>订单号</th><th>客户</th><th>金额</th><th>风险</th><th>状态</th><th></th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <div class="ai">
+    <div class="card">
+      <div class="ai-title"><span class="spark">✦</span> AI 风险分析</div>
+      <div class="ai-row">
+        <input id="q" placeholder="问 AI:例如 “分析当前订单风险并给出审批建议”" />
+        <button id="ask">分析</button>
+      </div>
+      <div class="analysis" id="analysis">AI 分析结果会显示在这里。</div>
+      <div class="traj" id="traj"></div>
+    </div>
+  </div>
+
+  <script>
+    var state = { orders: [], stats: {}, aiAnalysis: "" };
+
+    function render() {
+      var s = state.stats || {};
+      document.getElementById("stats").innerHTML =
+        stat("待审", s.pending) + stat("已批准", s.approved) + stat("总数", s.total) +
+        stat("待审金额", s.amount_pending != null ? ("¥" + s.amount_pending.toLocaleString()) : "-");
+
+      var rows = (state.orders || []).map(function (o) {
+        var approved = o.status === "approved";
+        return '<tr>' +
+          '<td><span class="id">' + o.id + '</span></td>' +
+          '<td>' + o.customer + '</td>' +
+          '<td><span class="amt">¥' + o.amount.toLocaleString() + '</span></td>' +
+          '<td><span class="risk ' + o.risk + '">' + o.risk + '</span></td>' +
+          '<td><span class="status ' + o.status + '">' + o.status + '</span></td>' +
+          '<td style="text-align:right">' + (approved ? '' :
+            '<button data-id="' + o.id + '">批准</button>') + '</td>' +
+          '</tr>';
+      }).join("");
+      document.getElementById("rows").innerHTML = rows;
+      Array.prototype.forEach.call(document.querySelectorAll("#rows button"), function (b) {
+        b.onclick = function () {
+          b.disabled = true;
+          oneagent.directAction("approve_order", { orderId: b.getAttribute("data-id") });
+        };
+      });
+
+      document.getElementById("analysis").textContent = state.aiAnalysis || "AI 分析结果会显示在这里。";
+    }
+
+    function stat(k, v) {
+      return '<div class="stat"><div class="k">' + k + '</div><div class="v">' + (v == null ? "-" : v) + '</div></div>';
+    }
+
+    // ui_update:与现有状态合并(MVP:整份字段覆盖)
+    oneagent.onUiUpdate(function (e) {
+      var sc = e.payload.structuredContent || {};
+      Object.keys(sc).forEach(function (k) { state[k] = sc[k]; });
+      render();
+    });
+
+    // 轨迹:展示 AI 思考 / 正文 / 工具调用
+    var trajEl = document.getElementById("traj");
+    function showTraj() { trajEl.classList.add("show"); }
+    oneagent.onTrajectory(function (e) {
+      showTraj();
+      if (e.type === "thinking") trajEl.textContent += "🧠 " + (e.payload.delta || "") + "\n";
+      else if (e.type === "text") trajEl.textContent += (e.payload.delta || "");
+      else if (e.type === "tool_call") trajEl.textContent += "\n🔧 " + e.payload.name + " " + JSON.stringify(e.payload.arguments) + "\n";
+      else if (e.type === "tool_result") trajEl.textContent += "↩︎ " + (e.payload.resultSummary || "").slice(0, 200) + "\n";
+      trajEl.scrollTop = trajEl.scrollHeight;
+    });
+
+    // 把当前界面状态作为 env 上报给 agent
+    oneagent.setEnv(function () {
+      return { orders: state.orders, stats: state.stats };
+    });
+
+    document.getElementById("ask").onclick = function () {
+      trajEl.textContent = "";
+      var intent = document.getElementById("q").value ||
+        "分析当前订单的风险并给出审批建议,把结论通过 app_emit 的 aiAnalysis 字段展示。";
+      oneagent.agentAction(intent, {});
+    };
+
+    // 显示当前预览设备(由客户端运行时通过 ?device= 注入)
+    document.getElementById("dev").textContent = oneagent.device;
+
+    // 进入即加载订单
+    oneagent.directAction("list_orders", {});
+    render();
+  </script>
+</body>
+</html>

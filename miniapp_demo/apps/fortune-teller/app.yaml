@@ -1,0 +1,15 @@
+id: fortune-teller
+name: 神秘占卜
+version: "1.0"
+description: 神秘占卜师——通过问答题库洞察命运，以结构化卦象卡片揭示指引。
+entry:
+  ui: assets/ui/index.html      # 单一响应式入口(适配 PC 与移动)
+permissions:
+  - microphone                  # 长按语音输入,由框架统一申请麦克风权限
+scripts:
+  - name: show_question
+    path: scripts/show_question.py
+    visibility: [agent]
+skill:
+  content_file_path: SKILL.md
+  binding_tools: [bash, app_emit]
