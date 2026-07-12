@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -51,6 +51,18 @@ def serve_sdk(filename: str):
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
     await handle_ws(websocket)
+
+
+# ---------- SPA static file serving (production) ----------
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+if _FRONTEND_DIST.is_dir():
+    @app.get("/{full_path:path}")
+    async def spa_fallback(request: Request, full_path: str):
+        file = _FRONTEND_DIST / full_path
+        if full_path and file.is_file():
+            return FileResponse(str(file))
+        return FileResponse(str(_FRONTEND_DIST / "index.html"))
 
 
 if __name__ == "__main__":
