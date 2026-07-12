@@ -8,8 +8,6 @@
 
 - Python 3.10+
 - Node.js 18+
-- Git
-
 ### 安装
 
 ```bash
@@ -18,10 +16,7 @@ cd miniapp
 ./install.sh
 ```
 
-`install.sh` 会自动：
-1. 克隆 `forge_os`（agent framework 依赖）
-2. 创建 Python 虚拟环境并安装依赖
-3. 安装前端 npm 依赖
+`install.sh` 会自动创建 Python 虚拟环境、安装后端和前端依赖。
 
 ### 配置
 
@@ -41,8 +36,8 @@ cd miniapp
 miniapp/
 ├── install.sh              # 安装脚本
 ├── run.sh                  # 启动脚本
-├── forge_os/               # (自动克隆) agent framework 依赖
 └── miniapp_demo/
+    ├── common/             # agent framework + LLM 基础设施
     ├── backend/            # FastAPI 后端
     ├── frontend/           # React + Vite 前端
     ├── apps/               # 内置小程序 (如 fortune-teller)

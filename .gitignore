@@ -5,4 +5,3 @@ node_modules/
 dist/
 *.zip
 .DS_Store
-forge_os/

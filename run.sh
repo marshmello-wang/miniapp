@@ -3,19 +3,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-export FORGE_OS_ROOT="$SCRIPT_DIR/forge_os"
-
 BACKEND_PORT="${BACKEND_PORT:-8790}"
 FRONTEND_PORT="${FRONTEND_PORT:-3790}"
 
 PY="$SCRIPT_DIR/miniapp_demo/.venv/bin/python"
 if [[ ! -x "$PY" ]]; then
     echo "[ERROR] Virtual environment not found. Run ./install.sh first."
-    exit 1
-fi
-
-if [[ ! -d "$FORGE_OS_ROOT/common" ]]; then
-    echo "[ERROR] forge_os not found at $FORGE_OS_ROOT. Run ./install.sh first."
     exit 1
 fi
 
