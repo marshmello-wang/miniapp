@@ -64,7 +64,7 @@ def exit_session(app_id: str, sessionId: Optional[str] = Query(None)):
         return {"status": "noop"}
     sid = sessionId or stores.session_id_for("local", app_id)
     ir = manifest.on_exit.inject_round
-    idx = stores.start_round(sid, ir.user, source="system")
+    idx = stores.start_round(sid, ir.user, source=f"miniapp:{app_id}")
     stores.complete_round(sid, idx, ir.assistant)
     return {"status": "ok", "round_idx": idx}
 

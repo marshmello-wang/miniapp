@@ -13,6 +13,8 @@ scripts:
 skill:
   content_file_path: SKILL.md
   binding_tools: [bash, app_emit]
+on_init:
+  user_message: "进入算命师模式"
 on_exit:
   inject_round:
     user: "退出算命师模式。"

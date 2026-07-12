@@ -18,6 +18,7 @@ export interface ChatMsg {
   /** miniapp 摘要卡片专用 */
   appId?: string;
   roundCount?: number;
+  miniappMessages?: { role: string; content: string }[];
 }
 
 interface Props {
@@ -40,8 +41,24 @@ function MiniappCard({ msg, onSkillClick }: { msg: ChatMsg; onSkillClick?: (s: s
           <span style={styles.miniappBadge}>{rounds} 轮</span>
           <span style={styles.miniappArrow}>{expanded ? "▾" : "▸"}</span>
         </div>
-        {expanded && msg.content && (
-          <div style={styles.miniappSummary}>{msg.content}</div>
+        {expanded && (
+          <div style={styles.miniappSummary}>
+            {msg.miniappMessages && msg.miniappMessages.length > 0 ? (
+              msg.miniappMessages.map((m, i) => (
+                <div key={i} style={styles.miniappMsg}>
+                  <span style={{
+                    ...styles.miniappMsgRole,
+                    color: m.role === "user" ? "#1976d2" : "#7c5cff",
+                  }}>
+                    {m.role === "user" ? "你" : "AI"}
+                  </span>
+                  <span style={styles.miniappMsgText}>{m.content}</span>
+                </div>
+              ))
+            ) : (
+              msg.content && <div>{msg.content}</div>
+            )}
+          </div>
         )}
         <div
           style={styles.miniappOpen}
@@ -232,10 +249,22 @@ const styles: Record<string, React.CSSProperties> = {
   },
   miniappArrow: { fontSize: 12, color: "#999" },
   miniappSummary: {
-    padding: "0 16px 10px",
+    padding: "10px 16px",
     fontSize: 13, lineHeight: 1.6, color: "#666",
     borderTop: "1px solid rgba(0,0,0,0.05)",
-    paddingTop: 10,
+    maxHeight: 300, overflowY: "auto" as const,
+    display: "flex", flexDirection: "column" as const, gap: 8,
+  },
+  miniappMsg: {
+    display: "flex", gap: 6, alignItems: "flex-start",
+  },
+  miniappMsgRole: {
+    flexShrink: 0, fontSize: 11, fontWeight: 700,
+    minWidth: 20,
+  },
+  miniappMsgText: {
+    fontSize: 13, lineHeight: 1.6, color: "#444",
+    whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const,
   },
   miniappOpen: {
     padding: "8px 16px",

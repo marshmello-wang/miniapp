@@ -96,19 +96,22 @@ def load_chat_history(session_id: str) -> List[Dict[str, Any]]:
     pending_app: Optional[str] = None
     pending_count = 0
     pending_last_ai = ""
+    pending_messages: List[Dict[str, str]] = []
 
     def flush_miniapp():
-        nonlocal pending_app, pending_count, pending_last_ai
+        nonlocal pending_app, pending_count, pending_last_ai, pending_messages
         if pending_app:
             history.append({
                 "role": "miniapp",
                 "appId": pending_app,
                 "rounds": pending_count,
                 "summary": pending_last_ai[:120] if pending_last_ai else "",
+                "messages": pending_messages,
             })
             pending_app = None
             pending_count = 0
             pending_last_ai = ""
+            pending_messages = []
 
     for rnd in rounds:
         if not rnd.user_content:
@@ -121,9 +124,13 @@ def load_chat_history(session_id: str) -> List[Dict[str, Any]]:
                 flush_miniapp()
             pending_app = app_id
             pending_count += 1
+            user_text = _content_to_text(rnd.user_content)
+            if user_text:
+                pending_messages.append({"role": "user", "content": user_text})
             ai_text = _content_to_text(rnd.ai_content)
             if ai_text:
                 pending_last_ai = ai_text
+                pending_messages.append({"role": "assistant", "content": ai_text})
             continue
 
         flush_miniapp()
@@ -257,6 +264,20 @@ def load_history(session_id: str) -> List[Dict[str, str]]:
             if ai_text:
                 history.append({"role": "assistant", "content": ai_text})
     return history
+
+
+def has_app_rounds(session_id: str, app_id: str) -> bool:
+    """检查 session 中是否已有指定小程序的交互轮次。"""
+    store = get_store()
+    with _lock:
+        rounds = store.get_rounds(session_id)
+    source_prefix = f"miniapp:{app_id}"
+    for rnd in rounds:
+        if rnd.user_content:
+            src = rnd.user_content[0].get("source", "")
+            if src.startswith(source_prefix):
+                return True
+    return False
 
 
 def start_round(session_id: str, user_text: str, source: str = "chat") -> int:

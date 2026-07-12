@@ -16,7 +16,7 @@
  *   oneagent.cancel(requestId)
  */
 (function () {
-  var handlers = { uiUpdate: [], trajectory: [] };
+  var handlers = { uiUpdate: [], trajectory: [], init: [] };
   var pending = {};
   var lastData = {};
   var envProvider = null;
@@ -58,6 +58,17 @@
 
     if (frame.data_type === "app.resource") {
       try { appId = frame.data.app.id; } catch (e) {}
+      var onInit = frame.data && frame.data.app && frame.data.app.on_init;
+      if (onInit && onInit.user_message) {
+        setTimeout(function () {
+          var msg = onInit.user_message;
+          if (handlers.init.length > 0) {
+            handlers.init.forEach(function (cb) { cb(msg); });
+          } else {
+            oneagent.agentAction(msg, {});
+          }
+        }, 0);
+      }
       return;
     }
     if (frame.data_type !== "app.event") return;
@@ -85,6 +96,7 @@
     get data() { return lastData; },
     onUiUpdate: function (cb) { handlers.uiUpdate.push(cb); },
     onTrajectory: function (cb) { handlers.trajectory.push(cb); },
+    onInit: function (cb) { handlers.init.push(cb); },
     directAction: function (name, args, cbs) {
       var requestId = uuid();
       pending[requestId] = cbs || {};

@@ -86,11 +86,11 @@ export function ChatPage() {
       ensureBuf();
       streamBuf.current!.content += delta;
       updateStreamMsg();
-    } else if (ev.type === "tool_call" && ev.payload?.name === "load_skill") {
-      const skillName = ev.payload?.arguments?.skill_name || ev.payload?.arguments?.name || "";
-      if (skillName) {
+    } else if (ev.type === "tool_call" && ev.payload?.name === "show_miniapp_entry") {
+      const appId = ev.payload?.arguments?.app_id || "";
+      if (appId) {
         ensureBuf();
-        streamBuf.current!.loadedSkill = skillName;
+        streamBuf.current!.loadedSkill = appId;
         updateStreamMsg();
       }
     } else if (ev.type === "done") {
@@ -127,6 +127,7 @@ export function ChatPage() {
           content: h.summary || "",
           appId: h.appId,
           roundCount: h.rounds,
+          miniappMessages: h.messages || [],
         };
       }
       return {

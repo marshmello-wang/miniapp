@@ -31,6 +31,11 @@ class InjectRoundDef:
 
 
 @dataclass
+class OnInitConfig:
+    user_message: str = ""
+
+
+@dataclass
 class OnExitConfig:
     inject_round: Optional[InjectRoundDef] = None
 
@@ -56,6 +61,7 @@ class AppManifest:
     entry_desktop: Optional[str] = None
     entry_mobile: Optional[str] = None
     permissions: List[str] = field(default_factory=list)
+    on_init: Optional[OnInitConfig] = None
     on_exit: Optional[OnExitConfig] = None
 
     def script_by_name(self, name: str) -> Optional[ScriptDef]:
@@ -118,6 +124,11 @@ def _parse_manifest(root: Path) -> Optional[AppManifest]:
     )
     entry_cfg = data.get("entry") or {}
     entry = entry_cfg.get("ui", "assets/ui/index.html")
+    on_init: Optional[OnInitConfig] = None
+    init_raw = data.get("on_init")
+    if isinstance(init_raw, dict) and init_raw.get("user_message"):
+        on_init = OnInitConfig(user_message=init_raw["user_message"])
+
     on_exit: Optional[OnExitConfig] = None
     exit_raw = data.get("on_exit")
     if isinstance(exit_raw, dict):
@@ -139,6 +150,7 @@ def _parse_manifest(root: Path) -> Optional[AppManifest]:
         entry_desktop=entry_cfg.get("desktop"),
         entry_mobile=entry_cfg.get("mobile"),
         permissions=list(data.get("permissions") or []),
+        on_init=on_init,
         on_exit=on_exit,
     )
 

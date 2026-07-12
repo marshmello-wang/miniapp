@@ -393,10 +393,22 @@
         if (body) { body.innerHTML = ''; charIdx = 0; var fb = '星象一时晦暗……再问一次吧。'; for (var i = 0; i < fb.length; i++) charQueue.push(fb[i]); oracleDone = false; dripTimer = setInterval(dripOne, DRIP_MS); setTimeout(function () { oracleDone = true; }, fb.length * DRIP_MS + 100); }
         oracle.classList.add('show');
       }
+      if (pendingQuestion) {
+        var q = pendingQuestion;
+        pendingQuestion = null;
+        setTimeout(function () { renderQuestion(q); }, 400);
+      }
     }
 
     // ========== QUESTION 态 ==========
+    var pendingQuestion = null;
+
     function renderQuestion(q) {
+      if (dripTimer) {
+        pendingQuestion = q;
+        return;
+      }
+      pendingQuestion = null;
       currentQuestion = q;
       qCard.classList.remove('show');
       qText.textContent = q.text;
@@ -608,6 +620,10 @@
 
     oneagent.setEnv(function () {
       return { app: 'fortune-teller', phase: currentPhase };
+    });
+
+    oneagent.onInit(function (message) {
+      ask(message);
     });
 
     // ========== 下拉查看历史 ==========

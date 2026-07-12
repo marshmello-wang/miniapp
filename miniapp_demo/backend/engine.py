@@ -35,7 +35,16 @@ class MiniAppEngine:
             return None
         session_id = session_id_override or stores.get_or_create_session(self.user, manifest)
         ui_url = f"/api/apps/{app_id}/ui/{Path(manifest.entry_ui).name}"
-        resource = protocol.make_resource_frame(session_id, manifest.to_dict(), ui_url)
+
+        on_init = None
+        if manifest.on_init and manifest.on_init.user_message:
+            first_visit = not stores.has_app_rounds(session_id, app_id)
+            if first_visit:
+                on_init = {"user_message": manifest.on_init.user_message}
+
+        resource = protocol.make_resource_frame(
+            session_id, manifest.to_dict(), ui_url, on_init=on_init,
+        )
         return {"session_id": session_id, "manifest": manifest.to_dict(), "resource": resource}
 
     # -------------------------------------------------- direct_action
