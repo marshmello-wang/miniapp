@@ -43,6 +43,10 @@ export function StandalonePage() {
   }
 
   useEffect(() => {
+    bridgeRef.current?.setWsReady(ws.connected);
+  }, [ws.connected]);
+
+  useEffect(() => {
     if (!appId) return;
     bridgeRef.current?.setApp(appId);
     return () => {

@@ -35,6 +35,10 @@ export function MiniappOverlay({ appId, sessionId, onClose }: Props) {
   }
 
   useEffect(() => {
+    bridgeRef.current?.setWsReady(ws.connected);
+  }, [ws.connected]);
+
+  useEffect(() => {
     bridgeRef.current?.setApp(appId, sessionId);
     return () => {
       bridgeRef.current?.setApp(null);

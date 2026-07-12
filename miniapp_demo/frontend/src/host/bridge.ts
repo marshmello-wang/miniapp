@@ -14,6 +14,8 @@ export class HostBridge {
   private sessionId: string | null = null;
   private iframe: HTMLIFrameElement | null = null;
   private listener: (e: MessageEvent) => void;
+  private wsReady = false;
+  private pendingUp: any[] = [];
 
   constructor(send: (frame: any) => void, onDebug: (f: DebugFrame) => void) {
     this.send = send;
@@ -33,6 +35,17 @@ export class HostBridge {
 
   setIframe(iframe: HTMLIFrameElement | null) {
     this.iframe = iframe;
+  }
+
+  /** Mark WebSocket as connected; flush any queued upstream frames. */
+  setWsReady(ready: boolean) {
+    this.wsReady = ready;
+    if (ready) {
+      for (const frame of this.pendingUp) {
+        this.send(frame);
+      }
+      this.pendingUp = [];
+    }
   }
 
   /** WS 下行帧 -> 分发。 */
@@ -57,6 +70,10 @@ export class HostBridge {
     if (!this.appId) return;
     const frame: any = { ...msg.frame, appId: this.appId };
     if (this.sessionId) frame.sessionId = this.sessionId;
-    this.send(frame);
+    if (this.wsReady) {
+      this.send(frame);
+    } else {
+      this.pendingUp.push(frame);
+    }
   }
 }
