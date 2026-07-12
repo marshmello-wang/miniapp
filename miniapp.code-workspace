@@ -2,9 +2,6 @@
 	"folders": [
 		{
 			"path": "."
-		},
-		{
-			"path": "../forge_os/common"
 		}
 	],
 	"settings": {}
