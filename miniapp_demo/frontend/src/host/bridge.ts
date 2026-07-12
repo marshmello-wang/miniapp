@@ -31,21 +31,16 @@ export class HostBridge {
   setApp(appId: string | null, sessionId?: string | null) {
     this.appId = appId;
     this.sessionId = sessionId ?? null;
+    this.flushPending();
   }
 
   setIframe(iframe: HTMLIFrameElement | null) {
     this.iframe = iframe;
   }
 
-  /** Mark WebSocket as connected; flush any queued upstream frames. */
   setWsReady(ready: boolean) {
     this.wsReady = ready;
-    if (ready) {
-      for (const frame of this.pendingUp) {
-        this.send(frame);
-      }
-      this.pendingUp = [];
-    }
+    this.flushPending();
   }
 
   /** WS 下行帧 -> 分发。 */
@@ -60,6 +55,16 @@ export class HostBridge {
     }
   }
 
+  private flushPending() {
+    if (!this.wsReady || !this.appId || this.pendingUp.length === 0) return;
+    for (const raw of this.pendingUp) {
+      const frame: any = { ...raw, appId: this.appId };
+      if (this.sessionId) frame.sessionId = this.sessionId;
+      this.send(frame);
+    }
+    this.pendingUp = [];
+  }
+
   private toIframe(frame: any) {
     this.iframe?.contentWindow?.postMessage({ source: "oneagent-host", frame }, "*");
   }
@@ -67,13 +72,12 @@ export class HostBridge {
   private handleIframeMessage(e: MessageEvent) {
     const msg = e.data;
     if (!msg || msg.source !== "oneagent" || !msg.frame) return;
-    if (!this.appId) return;
+    if (!this.appId || !this.wsReady) {
+      this.pendingUp.push(msg.frame);
+      return;
+    }
     const frame: any = { ...msg.frame, appId: this.appId };
     if (this.sessionId) frame.sessionId = this.sessionId;
-    if (this.wsReady) {
-      this.send(frame);
-    } else {
-      this.pendingUp.push(frame);
-    }
+    this.send(frame);
   }
 }
