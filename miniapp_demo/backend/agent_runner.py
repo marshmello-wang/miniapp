@@ -1,15 +1,4 @@
-"""Agent Runner —— 接入 LLM,构建方式与 lite_code 完全一致。
-
-复用 lite_code 的:自定义工具(read_file/list_files/grep_search)、系统提示词
-(get_system_prompt)、以及 create_agent 的全部装配(LLMClient + ToolRegistry +
-MemoryConfig + DefaultContextStrategy + OrchestratorAgent 图 + run_task)。
-
-小程序特有的增量(不改变 lite_code 的接入方式):
-- bash 的 cwd = 小程序根目录,并注入 MINIAPP_STORE(业务 store 目录)。
-- 额外注册 app_emit 工具(把 structuredContent 推到界面)。
-- 按单个小程序 skill 构建 SkillConfig;mini-app 场景说明通过 get_system_prompt 的
-  extra_context 注入(lite_code 原生支持的通道)。
-"""
+"""Agent Runner —— 小程序 Agent 构建与运行。"""
 from __future__ import annotations
 
 import asyncio
@@ -37,9 +26,7 @@ from common.agent_framework.user_interface.events import Event
 from common.agent_framework.builtin_tools import BashTool, TextEditTool
 from common.agent_framework.builtin_tools.bash_tool import BashResult
 
-# 直接复用 lite_code 的工具与系统提示词(与 lite_code 完全一样)
-from lite_code.backend.tools import ReadFileTool, ListFilesTool, GrepSearchTool
-from lite_code.backend.context.system_prompt import get_system_prompt
+from common.lite_tools import ReadFileTool, ListFilesTool, GrepSearchTool, get_system_prompt
 
 from common.agent_framework.agent_loop.hooks import DefaultHook, HookContext, HookResult
 
@@ -47,7 +34,7 @@ from .app_registry import AppManifest
 from . import config as cfg
 
 
-# mini-app 场景说明:通过 lite_code 原生的 extra_context 通道注入
+# mini-app 场景说明:通过 system prompt 的 extra_context 通道注入
 MINIAPP_EXTRA_CONTEXT = (
     "This session powers a mini-app (小程序) running in a sandbox, not a generic coding task.\n"
     "- Business data lives in the directory given by the environment variable MINIAPP_STORE.\n"
