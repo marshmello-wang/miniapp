@@ -30,7 +30,7 @@ echo "[ok] Node.js $(node --version)"
 
 # ---- Python venv + deps ----
 echo ""
-echo "[1/2] Creating Python virtual environment..."
+echo "[1/3] Creating Python virtual environment..."
 cd "$SCRIPT_DIR/miniapp_demo"
 python3 -m venv .venv
 source .venv/bin/activate
@@ -42,9 +42,13 @@ pip install httpx jinja2 -q
 echo "  done ($(pip list --format=freeze | wc -l | tr -d ' ') packages)"
 
 # ---- Frontend deps ----
-echo "[2/2] Installing frontend dependencies..."
+echo "[2/3] Installing frontend dependencies..."
 cd "$SCRIPT_DIR/miniapp_demo/frontend"
 npm install --no-fund --no-audit 2>&1 | tail -1
+
+# ---- Frontend build ----
+echo "[3/3] Building frontend for production..."
+npx vite build
 cd "$SCRIPT_DIR"
 
 echo ""
@@ -54,6 +58,6 @@ echo ""
 echo "  Next steps:"
 echo "    1. Edit config:  ~/.miniapp/config.json"
 echo "       (set your LLM provider / api_key)"
-echo "    2. Start:        ./run.sh"
-echo "    3. Open:         http://localhost:3790"
+echo "    2. Start (prod): ./run.sh prod"
+echo "    3. Start (dev):  ./run.sh"
 echo "=========================================="
