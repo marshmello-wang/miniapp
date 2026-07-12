@@ -41,7 +41,8 @@ def main():
         "structuredContent": {
             "phase": "question",
             "question": question,
-        }
+        },
+        "agentSignal": "end_turn",
     }
     print(json.dumps(output, ensure_ascii=False))
 

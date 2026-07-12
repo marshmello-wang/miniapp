@@ -11,6 +11,7 @@ export class HostBridge {
   private send: (frame: any) => void;
   private onDebug: (f: DebugFrame) => void;
   private appId: string | null = null;
+  private sessionId: string | null = null;
   private iframe: HTMLIFrameElement | null = null;
   private listener: (e: MessageEvent) => void;
 
@@ -25,8 +26,9 @@ export class HostBridge {
     window.removeEventListener("message", this.listener);
   }
 
-  setApp(appId: string | null) {
+  setApp(appId: string | null, sessionId?: string | null) {
     this.appId = appId;
+    this.sessionId = sessionId ?? null;
   }
 
   setIframe(iframe: HTMLIFrameElement | null) {
@@ -53,7 +55,8 @@ export class HostBridge {
     const msg = e.data;
     if (!msg || msg.source !== "oneagent" || !msg.frame) return;
     if (!this.appId) return;
-    const frame = { ...msg.frame, appId: this.appId };
+    const frame: any = { ...msg.frame, appId: this.appId };
+    if (this.sessionId) frame.sessionId = this.sessionId;
     this.send(frame);
   }
 }

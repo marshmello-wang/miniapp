@@ -13,11 +13,16 @@ MemoryConfig + DefaultContextStrategy + OrchestratorAgent 图 + run_task)。
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 from common.llm import LLMClient, LLMConfig
+from common.llm import (
+    Message as LLMMessage, ToolCall as LLMToolCall,
+    ChatRequest, Tool as LLMTool,
+)
 from common.agent_framework.agent_loop.react_agent import ReactAgent
 from common.agent_framework.agent_loop.config import ReactAgentConfig, SkillConfig
 from common.agent_framework.tool_adapter.registry import ToolRegistry
@@ -35,6 +40,8 @@ from common.agent_framework.builtin_tools.bash_tool import BashResult
 # 直接复用 lite_code 的工具与系统提示词(与 lite_code 完全一样)
 from lite_code.backend.tools import ReadFileTool, ListFilesTool, GrepSearchTool
 from lite_code.backend.context.system_prompt import get_system_prompt
+
+from common.agent_framework.agent_loop.hooks import DefaultHook, HookContext, HookResult
 
 from .app_registry import AppManifest
 from . import config as cfg
@@ -154,7 +161,87 @@ def _make_app_emit_tool():
     return app_emit
 
 
-def create_react_agent(manifest: AppManifest, store_dir: Path) -> ReactAgent:
+class _MiniappContextStrategy(DefaultContextStrategy):
+    """扩展默认策略，支持预加载的 LLMMessage 历史（含标准 tool call/result）。
+
+    与 DefaultContextStrategy 唯一区别：在 system prompt 之后、当前用户消息之前，
+    插入预加载的历史消息，这些消息可以包含 assistant tool_calls 和 tool role 消息。
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._rich_history: List[LLMMessage] = []
+
+    def set_rich_history(self, messages: List[LLMMessage]) -> None:
+        self._rich_history = messages
+
+    def build_context(self, task_input, events, environment_states, system_prompt, tools):
+        final_system_prompt = self._build_system_prompt(system_prompt, environment_states)
+
+        messages: List[LLMMessage] = []
+        if final_system_prompt:
+            messages.append(LLMMessage(role="system", content=final_system_prompt))
+
+        messages.extend(self._rich_history)
+
+        for msg in task_input.messages:
+            messages.append(self._convert_message(msg))
+
+        event_messages = self._process_events(events)
+        messages.extend(event_messages)
+
+        messages = self._apply_environment_states(messages, environment_states)
+
+        llm_tools = None
+        if tools:
+            llm_tools = [
+                LLMTool(name=t.name, description=t.description, parameters=t.schema)
+                for t in tools
+            ]
+
+        return ChatRequest(messages=messages, tools=llm_tools)
+
+
+class _AgentSignalHook(DefaultHook):
+    """解析 bash stdout 中的 agentSignal，支持 CLI 脚本声明式控制 react 循环。
+
+    脚本在 stdout JSON 中输出 "agentSignal": "end_turn" 即可终止本轮。
+    """
+
+    def after_tool_execution(self, ctx: HookContext) -> HookResult:
+        if ctx.current_tool_name != "bash" or not ctx.current_tool_result:
+            return HookResult.continue_execution()
+        stdout = ctx.current_tool_result.data
+        if not isinstance(stdout, str):
+            stdout = getattr(ctx.current_tool_result.data, "stdout", "") if ctx.current_tool_result.data else ""
+        signal = _parse_agent_signal(stdout)
+        if signal == "end_turn":
+            return HookResult.stop()
+        return HookResult.continue_execution()
+
+
+def _parse_agent_signal(text: str) -> Optional[str]:
+    """从 bash stdout 中提取 agentSignal 字段。"""
+    if "agentSignal" not in text:
+        return None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict) and "agentSignal" in obj:
+                return obj["agentSignal"]
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return None
+
+
+def create_react_agent(
+    manifest: AppManifest,
+    store_dir: Path,
+    context_strategy: Optional[DefaultContextStrategy] = None,
+) -> ReactAgent:
     """按单个小程序 skill 构建 ReactAgent（直接流式，不经 Orchestrator 包装）。"""
     config = cfg.load_config()
     llm_cfg = cfg.get_llm_config(config)
@@ -195,7 +282,7 @@ def create_react_agent(manifest: AppManifest, store_dir: Path) -> ReactAgent:
     return ReactAgent(ReactAgentConfig(
         llm_client=llm_client,
         tool_registry=tool_registry,
-        context_strategy=DefaultContextStrategy(),
+        context_strategy=context_strategy or DefaultContextStrategy(),
         system_prompt=get_system_prompt(extra_context=MINIAPP_EXTRA_CONTEXT),
         max_iterations=agent_cfg.get("max_iterations", 30),
         max_tokens=agent_cfg.get("max_tokens", 8192),
@@ -203,7 +290,39 @@ def create_react_agent(manifest: AppManifest, store_dir: Path) -> ReactAgent:
         thinking_level=agent_cfg.get("thinking_level"),
         memory_config=memory_config,
         skill_config=skill_config,
+        hooks=[_AgentSignalHook()],
     ))
+
+
+def _dicts_to_llm_messages(history: List[Dict[str, Any]]) -> List[LLMMessage]:
+    """将 load_history_rich() 返回的标准 API 格式 dicts 转为 LLMMessage 对象。"""
+    messages: List[LLMMessage] = []
+    for msg in history:
+        role = msg["role"]
+        if role == "tool":
+            messages.append(LLMMessage(
+                role="tool",
+                content=msg.get("content", ""),
+                tool_call_id=msg.get("tool_call_id", ""),
+                name=msg.get("name", ""),
+            ))
+        elif role == "assistant" and msg.get("tool_calls"):
+            tool_calls = [
+                LLMToolCall(
+                    id=tc["id"], name=tc["name"], arguments=tc["arguments"],
+                )
+                for tc in msg["tool_calls"]
+            ]
+            messages.append(LLMMessage(
+                role="assistant",
+                content=msg.get("content", ""),
+                tool_calls=tool_calls,
+            ))
+        else:
+            messages.append(LLMMessage(
+                role=role, content=msg.get("content", ""),
+            ))
+    return messages
 
 
 def run_agent(
@@ -212,21 +331,20 @@ def run_agent(
     session_id: str,
     task_id: str,
     user_message: str,
-    history: Optional[List[Dict[str, str]]] = None,
+    history: Optional[List[Dict[str, Any]]] = None,
 ) -> Iterator[Event]:
     """执行一轮任务:拼历史 + 当前消息 → TaskInput → ReactAgent.run(真流式)。
 
-    直接调用 ReactAgent.run() 而非 OrchestratorAgent.run()，
-    因为 OrchestratorAgent 的 AgentNode.execute() 会把所有事件
-    攒到列表再回放，导致前端收到的事件全部堆积在一起。
+    history 使用标准 LLM API 消息格式（含 tool_calls / tool role），
+    通过 MiniappContextStrategy 注入上下文，而非全部塞进 TaskInput.messages。
     """
-    react_agent = create_react_agent(manifest, store_dir)
+    strategy = _MiniappContextStrategy()
+    if history:
+        strategy.set_rich_history(_dicts_to_llm_messages(history))
 
-    messages: List[Message] = []
-    for msg in history or []:
-        messages.append(Message.from_role_and_text(msg["role"], msg["content"]))
-    messages.append(Message.from_role_and_text("user", user_message))
+    react_agent = create_react_agent(manifest, store_dir, context_strategy=strategy)
 
+    messages = [Message.from_role_and_text("user", user_message)]
     task_input = TaskInput(session_id=session_id, task_id=task_id, messages=messages)
     for event in react_agent.run(task_input):
         yield event

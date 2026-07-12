@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, Iterable, Iterator, List
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 from common.agent_framework.user_interface.content_blocks import (
     TextBlock,
@@ -37,16 +37,24 @@ def _extract_structured_content(text: str) -> Dict[str, Any] | None:
     return None
 
 
-def make_resource_frame(app_session: str, manifest_dict: Dict[str, Any], ui_url: str) -> Dict[str, Any]:
+def make_resource_frame(
+    app_session: str,
+    manifest_dict: Dict[str, Any],
+    ui_url: str,
+    on_init: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    app_info: Dict[str, Any] = {
+        "id": manifest_dict["id"],
+        "name": manifest_dict["name"],
+        "version": manifest_dict["version"],
+    }
+    if on_init:
+        app_info["on_init"] = on_init
     return {
         "data_type": "app.resource",
         "data": {
             "appSession": app_session,
-            "app": {
-                "id": manifest_dict["id"],
-                "name": manifest_dict["name"],
-                "version": manifest_dict["version"],
-            },
+            "app": app_info,
             "resource": {"uri": ui_url, "mimeType": "text/html;profile=app-skill"},
         },
     }

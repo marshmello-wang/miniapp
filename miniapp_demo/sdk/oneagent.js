@@ -11,24 +11,29 @@
  *   oneagent.directAction(name, args, {onData,onDone,onTrajectory})  // 不经过 AI
  *   oneagent.agentAction(intent, focus, {onData,onDone,onTrajectory}) // 经过 AI
  *   oneagent.setEnv(fn)               // 提供当前界面状态,agentAction 时随包上报
+ *   oneagent.getHistory()              // 获取当前 session 的对话历史,返回 Promise<[{role,content}]>
  *   oneagent.transcribe(blob)         // 语音转文字,返回 Promise<string>
  *   oneagent.cancel(requestId)
  */
 (function () {
-  var handlers = { uiUpdate: [], trajectory: [] };
+  var handlers = { uiUpdate: [], trajectory: [], init: [] };
   var pending = {};
   var lastData = {};
   var envProvider = null;
+  var appId = null;
+
+  var _params;
+  try { _params = new URLSearchParams(window.location.search); } catch (e) { _params = null; }
 
   // 客户端运行时通过 ?device=desktop|mobile 注入当前预览设备
-  var DEVICE = "desktop";
-  try {
-    DEVICE = new URLSearchParams(window.location.search).get("device") || "desktop";
-  } catch (e) {}
+  var DEVICE = (_params && _params.get("device")) || "desktop";
   // 便于 CSS 按设备适配:<html data-device="mobile">
   try {
     document.documentElement.setAttribute("data-device", DEVICE);
   } catch (e) {}
+
+  // 共享 session: overlay 通过 ?sessionId=xxx 传入 chat session
+  var SESSION_ID = (_params && _params.get("sessionId")) || null;
 
   function post(frame) {
     parent.postMessage({ source: "oneagent", frame: frame }, "*");
@@ -52,6 +57,18 @@
     var frame = msg.frame;
 
     if (frame.data_type === "app.resource") {
+      try { appId = frame.data.app.id; } catch (e) {}
+      var onInit = frame.data && frame.data.app && frame.data.app.on_init;
+      if (onInit && onInit.user_message) {
+        setTimeout(function () {
+          var msg = onInit.user_message;
+          if (handlers.init.length > 0) {
+            handlers.init.forEach(function (cb) { cb(msg); });
+          } else {
+            oneagent.agentAction(msg, {});
+          }
+        }, 0);
+      }
       return;
     }
     if (frame.data_type !== "app.event") return;
@@ -79,10 +96,13 @@
     get data() { return lastData; },
     onUiUpdate: function (cb) { handlers.uiUpdate.push(cb); },
     onTrajectory: function (cb) { handlers.trajectory.push(cb); },
+    onInit: function (cb) { handlers.init.push(cb); },
     directAction: function (name, args, cbs) {
       var requestId = uuid();
       pending[requestId] = cbs || {};
-      post({ data_type: "app.call", name: name, args: args || {}, requestId: requestId });
+      var f = { data_type: "app.call", name: name, args: args || {}, requestId: requestId };
+      if (SESSION_ID) f.sessionId = SESSION_ID;
+      post(f);
       return requestId;
     },
     agentAction: function (intent, focus, cbs) {
@@ -90,18 +110,27 @@
       pending[requestId] = cbs || {};
       var env = collectEnv() || {};
       if (env.device == null) env.device = DEVICE; // 把当前设备并入 env 上报给 agent
-      post({
+      var af = {
         data_type: "app.agent",
         intent: intent,
         focus: focus || {},
         env: env,
         requestId: requestId,
-      });
+      };
+      if (SESSION_ID) af.sessionId = SESSION_ID;
+      post(af);
       return requestId;
     },
     setEnv: function (fn) { envProvider = fn; },
     cancel: function (requestId) { post({ data_type: "cancel", requestId: requestId }); },
-    // 语音转文字:上传录音 blob 到后端 ASR,返回识别文本(Promise<string>)。
+    getHistory: function () {
+      if (!appId) return Promise.resolve([]);
+      var url = "/api/apps/" + encodeURIComponent(appId) + "/history";
+      if (SESSION_ID) url += "?sessionId=" + encodeURIComponent(SESSION_ID);
+      return fetch(url)
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .catch(function () { return []; });
+    },
     transcribe: function (blob, filename) {
       var form = new FormData();
       form.append("audio", blob, filename || "audio.webm");
@@ -117,5 +146,7 @@
   };
 
   window.oneagent = oneagent;
-  post({ data_type: "app.init" });
+  var initFrame = { data_type: "app.init" };
+  if (SESSION_ID) initFrame.sessionId = SESSION_ID;
+  post(initFrame);
 })();

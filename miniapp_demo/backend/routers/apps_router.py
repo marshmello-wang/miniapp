@@ -1,9 +1,10 @@
 """小程序列表 / 新建 / manifest / UI 资源服务。"""
 from __future__ import annotations
 
+from typing import Optional
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -46,12 +47,26 @@ def get_manifest(app_id: str):
 
 
 @router.get("/{app_id}/history")
-def get_history(app_id: str):
+def get_history(app_id: str, sessionId: Optional[str] = Query(None)):
     manifest = app_registry.get_app(app_id)
     if manifest is None:
         raise HTTPException(404, "app not found")
-    session_id = stores.session_id_for("local", app_id)
+    session_id = sessionId or stores.session_id_for("local", app_id)
     return stores.load_history(session_id)
+
+
+@router.post("/{app_id}/exit-session")
+def exit_session(app_id: str, sessionId: Optional[str] = Query(None)):
+    manifest = app_registry.get_app(app_id)
+    if manifest is None:
+        raise HTTPException(404, "app not found")
+    if not manifest.on_exit or not manifest.on_exit.inject_round:
+        return {"status": "noop"}
+    sid = sessionId or stores.session_id_for("local", app_id)
+    ir = manifest.on_exit.inject_round
+    idx = stores.start_round(sid, ir.user, source=f"miniapp:{app_id}")
+    stores.complete_round(sid, idx, ir.assistant)
+    return {"status": "ok", "round_idx": idx}
 
 
 @router.post("/{app_id}/reset-session")

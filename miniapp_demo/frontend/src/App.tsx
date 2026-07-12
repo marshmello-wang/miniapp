@@ -11,6 +11,7 @@ import { SkillEditor } from "./components/SkillEditor";
 import { NewAppDialog } from "./components/NewAppDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StandalonePage } from "./pages/StandalonePage";
+import { ChatPage } from "./pages/ChatPage";
 
 type View =
   | { type: "empty" }
@@ -159,6 +160,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/app/:appId" element={<StandalonePage />} />
+      <Route path="/chat" element={<ChatPage />} />
       <Route path="*" element={<Workbench />} />
     </Routes>
   );
