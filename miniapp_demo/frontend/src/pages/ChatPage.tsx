@@ -114,11 +114,18 @@ export function ChatPage() {
     if (!username) return;
     const list = await api.listChatSessions(username);
     setSessions(list);
+    return list;
   }, [username]);
 
   useEffect(() => {
-    refreshSessions();
-  }, [refreshSessions]);
+    refreshSessions().then((list) => {
+      if (list && list.length > 0 && !activeSessionId) {
+        const latest = list[0];
+        setActiveSessionId(latest.session_id);
+        loadHistory(latest.session_id);
+      }
+    });
+  }, [refreshSessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadHistory = useCallback(async (sessionId: string) => {
     const hist = await api.getChatHistory(sessionId);
