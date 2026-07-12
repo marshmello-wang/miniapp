@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { NameInput } from "../components/NameInput";
 import { SessionSidebar } from "../components/SessionSidebar";
 import { ChatMessages, type ChatMsg, type DebugEvent } from "../components/ChatMessages";
@@ -29,6 +30,7 @@ interface Session {
 let msgCounter = 0;
 
 export function ChatPage() {
+  const isMobile = useIsMobile();
   const [username, setUsername] = useState(() => getCookie("chat_username"));
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -36,6 +38,7 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [overlay, setOverlay] = useState<{ appId: string; sessionId: string } | null>(null);
   const [debugMsg, setDebugMsg] = useState<ChatMsg | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const streamBuf = useRef<ChatMsg | null>(null);
   const streamEvents = useRef<DebugEvent[]>([]);
@@ -217,32 +220,73 @@ export function ChatPage() {
     return <NameInput onSubmit={handleLogin} />;
   }
 
+  const activeTitle = sessions.find((s) => s.session_id === activeSessionId)?.title || "对话";
+
   return (
     <div style={styles.page}>
-      <SessionSidebar
-        sessions={sessions}
-        activeId={activeSessionId}
-        username={username}
-        onSelect={selectSession}
-        onCreate={createSession}
-        onDelete={deleteSession}
-        onLogout={handleLogout}
-      />
+      {/* Desktop sidebar */}
+      {!isMobile && (
+        <SessionSidebar
+          sessions={sessions}
+          activeId={activeSessionId}
+          username={username}
+          onSelect={selectSession}
+          onCreate={createSession}
+          onDelete={deleteSession}
+          onLogout={handleLogout}
+        />
+      )}
+
+      {/* Mobile drawer overlay */}
+      {isMobile && sidebarOpen && (
+        <div style={styles.drawerOverlay} onClick={() => setSidebarOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <SessionSidebar
+              sessions={sessions}
+              activeId={activeSessionId}
+              username={username}
+              isMobile
+              onSelect={selectSession}
+              onCreate={createSession}
+              onDelete={deleteSession}
+              onLogout={handleLogout}
+              onClose={() => setSidebarOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
       <div style={styles.main}>
+        {/* Mobile top bar */}
+        {isMobile && (
+          <div style={styles.mobileBar}>
+            <button style={styles.hamburger} onClick={() => setSidebarOpen(true)}>
+              ☰
+            </button>
+            <span style={styles.mobileTitle}>
+              {activeSessionId ? activeTitle : "选择对话"}
+            </span>
+            <button style={styles.mobileNewBtn} onClick={createSession}>+</button>
+          </div>
+        )}
+
         {activeSessionId ? (
           <>
             <ChatMessages
               messages={messages}
               streaming={streaming}
+              isMobile={isMobile}
               onSkillClick={handleSkillClick}
               onDebug={setDebugMsg}
             />
-            <ChatInput onSend={sendMessage} disabled={streaming} />
+            <ChatInput onSend={sendMessage} disabled={streaming} isMobile={isMobile} />
           </>
         ) : (
           <div style={styles.placeholder}>
             <div style={styles.placeholderIcon}>💬</div>
-            <div style={styles.placeholderText}>选择一个对话或创建新对话</div>
+            <div style={styles.placeholderText}>
+              {isMobile ? "点击左上角 ☰ 选择或创建对话" : "选择一个对话或创建新对话"}
+            </div>
           </div>
         )}
       </div>
@@ -279,6 +323,7 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     display: "flex", flexDirection: "column",
     overflow: "hidden",
+    minWidth: 0,
   },
   placeholder: {
     flex: 1, display: "flex", flexDirection: "column",
@@ -287,4 +332,31 @@ const styles: Record<string, React.CSSProperties> = {
   },
   placeholderIcon: { fontSize: 56, marginBottom: 16 },
   placeholderText: { fontSize: 16, color: "#bbb" },
+  drawerOverlay: {
+    position: "fixed", inset: 0, zIndex: 1000,
+    background: "rgba(0,0,0,0.35)",
+    display: "flex",
+  },
+  mobileBar: {
+    display: "flex", alignItems: "center",
+    padding: "10px 12px",
+    borderBottom: "1px solid #f0f0f0",
+    background: "#fff",
+    gap: 8,
+    flexShrink: 0,
+  },
+  hamburger: {
+    background: "none", border: "none",
+    fontSize: 22, color: "#555", cursor: "pointer",
+    padding: "4px 8px", lineHeight: 1,
+  },
+  mobileTitle: {
+    flex: 1, fontSize: 16, fontWeight: 600, color: "#333",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const,
+  },
+  mobileNewBtn: {
+    background: "none", border: "none",
+    fontSize: 24, color: "#667eea", cursor: "pointer",
+    padding: "4px 8px", lineHeight: 1, fontWeight: 300,
+  },
 };

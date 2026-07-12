@@ -48,9 +48,10 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#fff",
     borderRadius: 20,
     padding: "48px 40px",
-    width: 360,
+    width: "min(360px, 88vw)",
     textAlign: "center" as const,
     boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+    boxSizing: "border-box" as const,
   },
   icon: { fontSize: 48, marginBottom: 12 },
   title: {

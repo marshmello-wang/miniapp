@@ -24,17 +24,18 @@ export interface ChatMsg {
 interface Props {
   messages: ChatMsg[];
   streaming: boolean;
+  isMobile?: boolean;
   onSkillClick?: (skillName: string) => void;
   onDebug?: (msg: ChatMsg) => void;
 }
 
-function MiniappCard({ msg, onSkillClick }: { msg: ChatMsg; onSkillClick?: (s: string) => void }) {
+function MiniappCard({ msg, isMobile, onSkillClick }: { msg: ChatMsg; isMobile?: boolean; onSkillClick?: (s: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const appId = msg.appId || "unknown";
   const rounds = msg.roundCount || 0;
   return (
     <div style={styles.miniappRow}>
-      <div style={styles.miniappCard}>
+      <div style={{ ...styles.miniappCard, ...(isMobile ? { maxWidth: "100%" } : {}) }}>
         <div style={styles.miniappHeader} onClick={() => setExpanded(!expanded)}>
           <span style={styles.miniappIcon}>📱</span>
           <span style={styles.miniappTitle}>{appId} 对话</span>
@@ -71,15 +72,21 @@ function MiniappCard({ msg, onSkillClick }: { msg: ChatMsg; onSkillClick?: (s: s
   );
 }
 
-export function ChatMessages({ messages, streaming, onSkillClick, onDebug }: Props) {
+export function ChatMessages({ messages, streaming, isMobile, onSkillClick, onDebug }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming]);
 
+  const containerStyle = isMobile
+    ? { ...styles.container, padding: "12px 12px" }
+    : styles.container;
+
+  const bubbleMaxWidth = isMobile ? "88%" : "72%";
+
   return (
-    <div style={styles.container}>
+    <div style={containerStyle}>
       {messages.length === 0 && !streaming && (
         <div style={styles.empty}>
           <div style={styles.emptyIcon}>💬</div>
@@ -88,12 +95,13 @@ export function ChatMessages({ messages, streaming, onSkillClick, onDebug }: Pro
       )}
       {messages.filter(Boolean).map((msg) =>
         msg.role === "miniapp" ? (
-          <MiniappCard key={msg.id} msg={msg} onSkillClick={onSkillClick} />
+          <MiniappCard key={msg.id} msg={msg} isMobile={isMobile} onSkillClick={onSkillClick} />
         ) : (
         <div key={msg.id} style={styles.row}>
           <div
             style={{
               ...styles.bubble,
+              maxWidth: bubbleMaxWidth,
               ...(msg.role === "user" ? styles.userBubble : styles.aiBubble),
               alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
             }}
