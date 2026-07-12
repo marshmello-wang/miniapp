@@ -1,13 +1,14 @@
 """WebSocket 处理:客户端运行时(Host)<-> 引擎。
 
 上行帧(Host -> 引擎):
-- app.init   {appId}
+- app.init   {appId, [sessionId]}
 - app.call   {appId, name, args, requestId}      # direct_action
-- app.agent  {appId, intent, focus, env, requestId}  # agent_action
+- app.agent  {appId, intent, focus, env, requestId, [sessionId]}  # agent_action
+- chat.send  {sessionId, intent, username, requestId}  # chat action
 - cancel     {requestId}
 
 下行帧(引擎 -> Host):
-- app.resource / app.event
+- app.resource / app.event / chat.event
 - debug      {dir: "up"|"down", frame}           # 每条上/下行帧镜像给 Debug 面板
 """
 from __future__ import annotations
@@ -19,12 +20,14 @@ from typing import Any, Dict
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .engine import MiniAppEngine
+from .chat_engine import ChatEngine
 
 
 class WSConnection:
     def __init__(self, websocket: WebSocket, user: str = "local"):
         self.ws = websocket
         self.engine = MiniAppEngine(user=user)
+        self.chat_engine = ChatEngine()
         self.tasks: Dict[str, asyncio.Task] = {}
         self._send_lock = asyncio.Lock()
 
@@ -66,12 +69,15 @@ class WSConnection:
             self._spawn(msg.get("requestId", ""), self._run_direct(msg))
         elif mtype == "app.agent":
             self._spawn(msg.get("requestId", ""), self._run_agent(msg))
+        elif mtype == "chat.send":
+            self._spawn(msg.get("requestId", ""), self._run_chat(msg))
         elif mtype == "cancel":
             self._handle_cancel(msg)
 
     async def _handle_init(self, msg: Dict[str, Any]) -> None:
         app_id = msg.get("appId", "")
-        info = self.engine.enter_app(app_id)
+        session_id = msg.get("sessionId")
+        info = self.engine.enter_app(app_id, session_id_override=session_id)
         if info is None:
             await self.emit({
                 "data_type": "app.event",
@@ -85,7 +91,11 @@ class WSConnection:
         name = msg.get("name", "")
         args = msg.get("args", {}) or {}
         request_id = msg.get("requestId", "")
-        async for frame in self.engine.direct_action(app_id, name, args, request_id):
+        session_id = msg.get("sessionId")
+        async for frame in self.engine.direct_action(
+            app_id, name, args, request_id,
+            session_id_override=session_id,
+        ):
             await self.emit(frame)
 
     async def _run_agent(self, msg: Dict[str, Any]) -> None:
@@ -94,7 +104,18 @@ class WSConnection:
         focus = msg.get("focus")
         env = msg.get("env")
         request_id = msg.get("requestId", "")
-        async for frame in self.engine.agent_action(app_id, intent, focus, env, request_id):
+        session_id = msg.get("sessionId")
+        async for frame in self.engine.agent_action(
+            app_id, intent, focus, env, request_id,
+            session_id_override=session_id,
+        ):
+            await self.emit(frame)
+
+    async def _run_chat(self, msg: Dict[str, Any]) -> None:
+        session_id = msg.get("sessionId", "")
+        intent = msg.get("intent", "") or ""
+        request_id = msg.get("requestId", "")
+        async for frame in self.chat_engine.chat_action(session_id, intent, request_id):
             await self.emit(frame)
 
     def _spawn(self, request_id: str, coro) -> None:

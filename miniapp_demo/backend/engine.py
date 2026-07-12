@@ -27,11 +27,13 @@ class MiniAppEngine:
         self.user = user
 
     # -------------------------------------------------- enter
-    def enter_app(self, app_id: str) -> Optional[Dict[str, Any]]:
+    def enter_app(
+        self, app_id: str, session_id_override: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         manifest = get_app(app_id)
         if manifest is None:
             return None
-        session_id = stores.get_or_create_session(self.user, manifest)
+        session_id = session_id_override or stores.get_or_create_session(self.user, manifest)
         ui_url = f"/api/apps/{app_id}/ui/{Path(manifest.entry_ui).name}"
         resource = protocol.make_resource_frame(session_id, manifest.to_dict(), ui_url)
         return {"session_id": session_id, "manifest": manifest.to_dict(), "resource": resource}
@@ -43,6 +45,7 @@ class MiniAppEngine:
         name: str,
         args: Dict[str, Any],
         request_id: str,
+        session_id_override: Optional[str] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         manifest = get_app(app_id)
         seq = protocol.SeqCounter()
@@ -51,7 +54,7 @@ class MiniAppEngine:
                                             {"status": "error", "error": "app not found"})
             return
 
-        session_id = stores.get_or_create_session(self.user, manifest)
+        session_id = session_id_override or stores.get_or_create_session(self.user, manifest)
         store_dir = stores.business_store_dir(session_id)
         script = manifest.script_by_name(name)
         if script is None or "ui" not in script.visibility:
@@ -81,6 +84,7 @@ class MiniAppEngine:
         focus: Optional[Dict[str, Any]],
         env: Optional[Dict[str, Any]],
         request_id: str,
+        session_id_override: Optional[str] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         manifest = get_app(app_id)
         seq = protocol.SeqCounter()
@@ -89,12 +93,13 @@ class MiniAppEngine:
                                             {"status": "error", "error": "app not found"})
             return
 
-        session_id = stores.get_or_create_session(self.user, manifest)
+        session_id = session_id_override or stores.get_or_create_session(self.user, manifest)
         store_dir = stores.business_store_dir(session_id)
-        history = stores.load_history(session_id)
+        history = stores.load_history_rich(session_id)
 
         user_message = _compose_prompt(intent, focus, env)
-        round_idx = stores.start_round(session_id, intent or "(agent_action)")
+        source = f"miniapp:{app_id}" if session_id_override else "chat"
+        round_idx = stores.start_round(session_id, intent or "(agent_action)", source=source)
 
         task_id = f"task_{uuid4().hex[:12]}"
         trajectory: List[Dict[str, Any]] = []
@@ -155,7 +160,7 @@ class MiniAppEngine:
         session_id: str,
         task_id: str,
         user_message: str,
-        history: List[Dict[str, str]],
+        history: List[Dict[str, Any]],
     ):
         """在线程里跑同步的 agent 生成器,通过队列桥接到 asyncio(真流式)。"""
         loop = asyncio.get_running_loop()

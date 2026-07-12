@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from . import config
-from .routers import apps_router, asr_router, config_router, files_router
+from .routers import apps_router, asr_router, chat_router, config_router, files_router
 from .ws_handler import handle_ws
 
 app = FastAPI(title="MiniApp Framework Demo")
@@ -22,6 +22,7 @@ app.add_middleware(
 )
 
 app.include_router(apps_router.router)
+app.include_router(chat_router.router)
 app.include_router(files_router.router)
 app.include_router(config_router.router)
 app.include_router(asr_router.router)
@@ -30,6 +31,7 @@ app.include_router(asr_router.router)
 @app.on_event("startup")
 def _startup() -> None:
     config.ensure_directories()
+    config.load_config()
     config.seed_bundled_apps()
 
 

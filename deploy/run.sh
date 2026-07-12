@@ -31,7 +31,8 @@ BACK_PID=$!
 
 echo "[run] starting frontend on :$FRONTEND_PORT"
 cd "$SCRIPT_DIR/miniapp_demo/frontend"
-npm run dev -- --port "$FRONTEND_PORT" --host &
+export FRONTEND_PORT
+npx vite &
 FRONT_PID=$!
 
 echo ""

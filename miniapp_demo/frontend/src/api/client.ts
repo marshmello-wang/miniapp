@@ -68,4 +68,43 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     }).then((r) => j<any>(r)),
+
+  createChatSession: (username: string, title: string = "") =>
+    fetch("/api/chat/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, title }),
+    }).then((r) => j<{ session_id: string; title: string; created_at: number }>(r)),
+
+  listChatSessions: (username: string) =>
+    fetch(`/api/chat/sessions?username=${encodeURIComponent(username)}`).then((r) =>
+      j<Array<{ session_id: string; title: string; created_at: number; updated_at: number; round_count: number }>>(r)
+    ),
+
+  getChatHistory: (sessionId: string) =>
+    fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/history`).then((r) =>
+      j<Array<{ role: string; content: string; roundIdx?: number }>>(r)
+    ),
+
+  deleteChatSession: (sessionId: string) =>
+    fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }).then((r) =>
+      j<{ ok: boolean }>(r)
+    ),
+
+  exitApp: (appId: string, sessionId: string) =>
+    fetch(`/api/apps/${encodeURIComponent(appId)}/exit-session?sessionId=${encodeURIComponent(sessionId)}`, {
+      method: "POST",
+    }).then((r) => j<{ status: string }>(r)),
+
+  getChatRoundDebug: (sessionId: string, roundIdx: number) =>
+    fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/rounds/${roundIdx}/debug`).then((r) =>
+      j<{
+        round_idx: number;
+        system_prompt: string;
+        user_input: string;
+        ai_output: string;
+        input_history: Array<{ role: string; content: string }>;
+        trajectory: any[];
+      }>(r)
+    ),
 };

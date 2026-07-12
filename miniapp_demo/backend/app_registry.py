@@ -24,6 +24,17 @@ class SkillDef:
     binding_tools: List[str] = field(default_factory=lambda: ["bash", "app_emit"])
 
 
+@dataclass
+class InjectRoundDef:
+    user: str
+    assistant: str
+
+
+@dataclass
+class OnExitConfig:
+    inject_round: Optional[InjectRoundDef] = None
+
+
 def _ui_rel(entry: str) -> str:
     """把 app 根相对的 entry 路径转成 assets/ui/ 下的相对文件名(用于 UI 静态服务)。"""
     if not entry:
@@ -45,6 +56,7 @@ class AppManifest:
     entry_desktop: Optional[str] = None
     entry_mobile: Optional[str] = None
     permissions: List[str] = field(default_factory=list)
+    on_exit: Optional[OnExitConfig] = None
 
     def script_by_name(self, name: str) -> Optional[ScriptDef]:
         for s in self.scripts:
@@ -106,6 +118,15 @@ def _parse_manifest(root: Path) -> Optional[AppManifest]:
     )
     entry_cfg = data.get("entry") or {}
     entry = entry_cfg.get("ui", "assets/ui/index.html")
+    on_exit: Optional[OnExitConfig] = None
+    exit_raw = data.get("on_exit")
+    if isinstance(exit_raw, dict):
+        ir = exit_raw.get("inject_round")
+        if isinstance(ir, dict) and "user" in ir and "assistant" in ir:
+            on_exit = OnExitConfig(
+                inject_round=InjectRoundDef(user=ir["user"], assistant=ir["assistant"]),
+            )
+
     return AppManifest(
         id=data.get("id", root.name),
         name=data.get("name", root.name),
@@ -118,6 +139,7 @@ def _parse_manifest(root: Path) -> Optional[AppManifest]:
         entry_desktop=entry_cfg.get("desktop"),
         entry_mobile=entry_cfg.get("mobile"),
         permissions=list(data.get("permissions") or []),
+        on_exit=on_exit,
     )
 
 

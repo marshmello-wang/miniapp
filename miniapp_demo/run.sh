@@ -31,7 +31,8 @@ if [[ ! -d node_modules ]]; then
   echo "[run] installing frontend deps…"
   npm install
 fi
-npm run dev -- --port "$FRONTEND_PORT" --host &
+export FRONTEND_PORT
+npx vite &
 FRONT_PID=$!
 
 echo "[run] backend:  http://localhost:$BACKEND_PORT"

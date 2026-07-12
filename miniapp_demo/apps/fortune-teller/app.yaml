@@ -13,3 +13,7 @@ scripts:
 skill:
   content_file_path: SKILL.md
   binding_tools: [bash, app_emit]
+on_exit:
+  inject_round:
+    user: "退出算命师模式。"
+    assistant: "好的，我已经退出占卜模式，恢复正常对话的语气和状态。有什么可以帮你的？"
