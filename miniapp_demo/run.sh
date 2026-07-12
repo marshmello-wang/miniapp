@@ -9,7 +9,10 @@ BACKEND_PORT="${BACKEND_PORT:-8790}"
 FRONTEND_PORT="${FRONTEND_PORT:-3790}"
 
 # forge_os 根目录(含 common/ = agent_framework + llm)
-export FORGE_OS_ROOT="${FORGE_OS_ROOT:-$(cd "$REPO_ROOT/.." && pwd)/forge_os}"
+export FORGE_OS_ROOT="${FORGE_OS_ROOT:-$REPO_ROOT/forge_os}"
+if [[ ! -d "$FORGE_OS_ROOT/common" ]]; then
+  export FORGE_OS_ROOT="$(cd "$REPO_ROOT/.." && pwd)/forge_os"
+fi
 PY="$SCRIPT_DIR/.venv/bin/python"
 [[ -x "$PY" ]] || PY="python3"
 
