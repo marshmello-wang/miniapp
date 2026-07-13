@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""approve_order: 批准指定订单,回写业务 store,输出更新后的订单与统计。"""
+"""approve_order: 批准指定订单，回写业务 store 并更新小程序界面。"""
 import json
 import os
+
+from miniapp_runtime import emit_ui
 
 
 def main() -> None:
@@ -31,13 +33,17 @@ def main() -> None:
         "approved": sum(1 for o in orders if o["status"] == "approved"),
         "amount_pending": sum(o["amount"] for o in orders if o["status"] == "pending"),
     }
-    print(json.dumps({
-        "structuredContent": {
+    emit_ui(
+        {
             "orders": orders,
             "stats": stats,
             "lastAction": {"approved": order_id, "ok": found},
         }
-    }, ensure_ascii=False))
+    )
+    if found:
+        print(f"订单 {order_id} 已批准。")
+    else:
+        print(f"未找到订单 {order_id}，未修改数据。")
 
 
 if __name__ == "__main__":

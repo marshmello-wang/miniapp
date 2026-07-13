@@ -74,15 +74,31 @@ class MiniAppEngine:
         result = await sandbox.run_script(
             manifest.root / script.path, manifest.root, store_dir, args
         )
-        yield protocol.make_event_frame(
-            "ui_update", session_id, request_id, seq.next(),
-            {"structuredContent": result.structured_content},
+        ui_updates = (
+            result.miniapp_metadata.get("uiUpdates", [])
+            if result.miniapp_metadata
+            else []
         )
-        summary = json.dumps(result.structured_content, ensure_ascii=False)[:400]
+        for structured_content in ui_updates:
+            yield protocol.make_event_frame(
+                "ui_update", session_id, request_id, seq.next(),
+                {"structuredContent": structured_content},
+            )
+        if result.ok:
+            count = len(ui_updates)
+            summary = (
+                f"completed with {count} UI update"
+                f"{'' if count == 1 else 's'}"
+            )
+        else:
+            summary = f"failed: {result.error or f'exit code {result.exit_code}'}"
         stores.append_app_action(session_id, name, args, summary)
+        done_payload = {"status": "success" if result.ok else "error"}
+        if result.error:
+            done_payload["error"] = result.error
         yield protocol.make_event_frame(
             "done", session_id, request_id, seq.next(),
-            {"status": "success" if result.ok else "error"},
+            done_payload,
         )
 
     # -------------------------------------------------- agent_action
@@ -113,7 +129,7 @@ class MiniAppEngine:
         task_id = f"task_{uuid4().hex[:12]}"
         trajectory: List[Dict[str, Any]] = []
         ai_text_parts: List[str] = []
-        saw_done = False
+        terminal_frame: Optional[Dict[str, Any]] = None
         error_text: Optional[str] = None
 
         _INTERNAL_EVENTS = frozenset((
@@ -138,29 +154,28 @@ class MiniAppEngine:
                 if isinstance(block, TextBlock):
                     ai_text_parts.append(block.text)
             frames = protocol.frames_for_event(ev, session_id, request_id, seq)
-            ui_frames = [f for f in frames if f["data"]["type"] == "ui_update"]
-            other_frames = [f for f in frames if f["data"]["type"] != "ui_update"]
-            for frame in ui_frames:
-                yield frame
-            if ui_frames and other_frames:
-                await asyncio.sleep(0.05)
-            for frame in other_frames:
+            for frame in frames:
                 if frame["data"]["type"] == "done":
-                    saw_done = True
-                yield frame
+                    terminal_frame = frame
+                else:
+                    yield frame
 
         if error_text is not None:
             yield protocol.make_event_frame("text", session_id, request_id, seq.next(),
                                             {"delta": f"[agent error] {error_text}", "final": True})
-            yield protocol.make_event_frame("done", session_id, request_id, seq.next(),
-                                            {"status": "error", "error": error_text})
-            saw_done = True
-        elif not saw_done:
-            yield protocol.make_event_frame("done", session_id, request_id, seq.next(),
-                                            {"status": "success"})
+            terminal_frame = protocol.make_event_frame(
+                "done", session_id, request_id, seq.next(),
+                {"status": "error", "error": error_text},
+            )
+        elif terminal_frame is None:
+            terminal_frame = protocol.make_event_frame(
+                "done", session_id, request_id, seq.next(),
+                {"status": "success"},
+            )
 
         ai_text = "".join(ai_text_parts).strip() or "(no text output)"
         stores.complete_round(session_id, round_idx, ai_text, trajectory=trajectory)
+        yield terminal_frame
 
     async def _stream_agent(
         self,
@@ -175,25 +190,50 @@ class MiniAppEngine:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         sentinel = object()
+        stop_event = threading.Event()
+
+        def offer(item) -> None:
+            if not stop_event.is_set():
+                queue.put_nowait(item)
 
         def worker():
+            source = None
             try:
-                for ev in run_agent(
+                source = run_agent(
                     manifest, store_dir, session_id, task_id, user_message, history
-                ):
-                    loop.call_soon_threadsafe(queue.put_nowait, ev)
+                )
+                iterator = iter(source)
+                while not stop_event.is_set():
+                    try:
+                        ev = next(iterator)
+                    except StopIteration:
+                        break
+                    if stop_event.is_set():
+                        break
+                    loop.call_soon_threadsafe(offer, ev)
             except Exception as exc:  # noqa: BLE001
-                loop.call_soon_threadsafe(queue.put_nowait, ("__error__", exc))
+                if not stop_event.is_set():
+                    loop.call_soon_threadsafe(offer, ("__error__", exc))
             finally:
-                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+                close = getattr(source, "close", None)
+                if close is not None:
+                    try:
+                        close()
+                    except Exception:
+                        pass
+                if not stop_event.is_set():
+                    loop.call_soon_threadsafe(offer, sentinel)
 
         threading.Thread(target=worker, daemon=True).start()
 
-        while True:
-            item = await queue.get()
-            if item is sentinel:
-                break
-            yield item
+        try:
+            while True:
+                item = await queue.get()
+                if item is sentinel:
+                    break
+                yield item
+        finally:
+            stop_event.set()
 
 
 def _compose_prompt(

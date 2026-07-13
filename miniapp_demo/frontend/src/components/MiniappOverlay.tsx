@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { HostBridge } from "../host/bridge";
-import { useWebSocket } from "../hooks/useWebSocket";
 import { DebugPanel } from "./DebugPanel";
 import type { DebugFrame } from "../types";
 
@@ -10,40 +9,19 @@ interface Props {
   onClose: () => void;
 }
 
-const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
-
 export function MiniappOverlay({ appId, sessionId, onClose }: Props) {
   const [showDebug, setShowDebug] = useState(false);
   const [frames, setFrames] = useState<DebugFrame[]>([]);
 
-  const sendRef = useRef<(f: any) => void>(() => {});
-  const bridgeRef = useRef<HostBridge | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const onDown = useCallback((data: any) => {
-    bridgeRef.current?.handleDownFrame(data);
-  }, []);
-
-  const ws = useWebSocket(WS_URL, onDown);
-  sendRef.current = ws.send;
-
-  if (!bridgeRef.current) {
-    bridgeRef.current = new HostBridge(
-      (frame) => sendRef.current(frame),
-      (f) => setFrames((prev) => [...prev, f]),
+  useLayoutEffect(() => {
+    const bridge = new HostBridge((f) =>
+      setFrames((prev) => [...prev, f]),
     );
-  }
-
-  useEffect(() => {
-    bridgeRef.current?.setWsReady(ws.connected);
-  }, [ws.connected]);
-
-  useEffect(() => {
-    bridgeRef.current?.setApp(appId, sessionId);
-    return () => {
-      bridgeRef.current?.setApp(null);
-      bridgeRef.current?.setIframe(null);
-    };
+    bridge.setApp(appId, sessionId);
+    bridge.setIframe(iframeRef.current);
+    return () => bridge.dispose();
   }, [appId, sessionId]);
 
   const uiUrl = `/api/apps/${appId}/ui/index.html?sessionId=${encodeURIComponent(sessionId)}`;
@@ -51,10 +29,7 @@ export function MiniappOverlay({ appId, sessionId, onClose }: Props) {
   return (
     <div style={styles.overlay}>
       <iframe
-        ref={(el) => {
-          iframeRef.current = el;
-          bridgeRef.current?.setIframe(el);
-        }}
+        ref={iframeRef}
         src={uiUrl}
         style={styles.iframe}
         allow="microphone"

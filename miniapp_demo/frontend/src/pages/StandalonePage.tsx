@@ -1,14 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { HostBridge } from "../host/bridge";
-import { useWebSocket } from "../hooks/useWebSocket";
 import { ensureMicPermission } from "../host/permissions";
 import type { AppManifest } from "../types";
 
 type Device = "desktop" | "mobile";
-
-const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 
 function detectDevice(): Device {
   if (typeof navigator !== "undefined" && /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
@@ -25,35 +22,20 @@ export function StandalonePage() {
 
   const device: Device = (searchParams.get("device") as Device) || detectDevice();
 
-  const sendRef = useRef<(f: any) => void>(() => {});
   const bridgeRef = useRef<HostBridge | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const onDown = useCallback((data: any) => {
-    bridgeRef.current?.handleDownFrame(data);
-  }, []);
-
-  const ws = useWebSocket(WS_URL, onDown);
-  sendRef.current = ws.send;
-
-  if (!bridgeRef.current) {
-    bridgeRef.current = new HostBridge(
-      (frame) => sendRef.current(frame),
-      () => {},
-    );
-  }
-
-  useEffect(() => {
-    bridgeRef.current?.setWsReady(ws.connected);
-  }, [ws.connected]);
-
-  useEffect(() => {
-    if (!appId) return;
-    bridgeRef.current?.setApp(appId);
+  useLayoutEffect(() => {
+    const bridge = new HostBridge(() => {});
+    bridgeRef.current = bridge;
+    if (appId) bridge.setApp(appId);
+    bridge.setIframe(iframeRef.current);
     return () => {
-      bridgeRef.current?.setApp(null);
-      bridgeRef.current?.setIframe(null);
+      bridge.dispose();
+      if (bridgeRef.current === bridge) bridgeRef.current = null;
     };
   }, [appId]);
+
 
   useEffect(() => {
     if (!appId) return;
@@ -99,7 +81,7 @@ export function StandalonePage() {
   return (
     <div style={styles.root}>
       <iframe
-        ref={(el) => bridgeRef.current?.setIframe(el)}
+        ref={iframeRef}
         src={src}
         title={manifest?.name || appId}
         allow={allow}

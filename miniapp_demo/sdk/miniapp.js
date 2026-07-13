@@ -1,19 +1,19 @@
 /*!
- * oneagent.js — app-skill v0.3 widget 侧 Bridge SDK
+ * miniapp.js — app-skill v0.3 widget 侧 Bridge SDK
  *
  * 在小程序 iframe 内运行,通过 postMessage 与客户端运行时(Host)通信。
- * Host 负责把上行帧转发到 WebSocket 引擎,并把下行 app.event 回传给本 iframe。
+ * Host 负责把上行帧 POST 到引擎,并把本次 Action 的 SSE 响应回传给本 iframe。
  *
  * API:
- *   oneagent.data                      // 最近一次 ui_update 的 structuredContent
- *   oneagent.onUiUpdate(cb)            // 订阅 ui_update 事件 (cb(event))
- *   oneagent.onTrajectory(cb)         // 订阅 thinking/text/tool_call/tool_result (cb(event))
- *   oneagent.directAction(name, args, {onData,onDone,onTrajectory})  // 不经过 AI
- *   oneagent.agentAction(intent, focus, {onData,onDone,onTrajectory}) // 经过 AI
- *   oneagent.setEnv(fn)               // 提供当前界面状态,agentAction 时随包上报
- *   oneagent.getHistory()              // 获取当前 session 的对话历史,返回 Promise<[{role,content}]>
- *   oneagent.transcribe(blob)         // 语音转文字,返回 Promise<string>
- *   oneagent.cancel(requestId)
+ *   miniapp.data                      // 最近一次 ui_update 的 structuredContent
+ *   miniapp.onUiUpdate(cb)            // 订阅 ui_update 事件 (cb(event))
+ *   miniapp.onTrajectory(cb)         // 订阅 thinking/text/tool_call/tool_result (cb(event))
+ *   miniapp.directAction(name, args, {onData,onDone,onTrajectory})  // 不经过 AI
+ *   miniapp.agentAction(intent, focus, {onData,onDone,onTrajectory}) // 经过 AI
+ *   miniapp.setEnv(fn)               // 提供当前界面状态,agentAction 时随包上报
+ *   miniapp.getHistory()              // 获取当前 session 的对话历史,返回 Promise<[{role,content}]>
+ *   miniapp.transcribe(blob)         // 语音转文字,返回 Promise<string>
+ *   miniapp.cancel(requestId)
  */
 (function () {
   var handlers = { uiUpdate: [], trajectory: [], init: [] };
@@ -36,7 +36,7 @@
   var SESSION_ID = (_params && _params.get("sessionId")) || null;
 
   function post(frame) {
-    parent.postMessage({ source: "oneagent", frame: frame }, "*");
+    parent.postMessage({ source: "miniapp", frame: frame }, "*");
   }
 
   function uuid() {
@@ -53,7 +53,7 @@
 
   window.addEventListener("message", function (e) {
     var msg = e.data;
-    if (!msg || msg.source !== "oneagent-host" || !msg.frame) return;
+    if (!msg || msg.source !== "miniapp-host" || !msg.frame) return;
     var frame = msg.frame;
 
     if (frame.data_type === "app.resource") {
@@ -65,7 +65,7 @@
           if (handlers.init.length > 0) {
             handlers.init.forEach(function (cb) { cb(msg); });
           } else {
-            oneagent.agentAction(msg, {});
+            miniapp.agentAction(msg, {});
           }
         }, 0);
       }
@@ -91,7 +91,7 @@
     }
   });
 
-  var oneagent = {
+  var miniapp = {
     device: DEVICE,
     get data() { return lastData; },
     onUiUpdate: function (cb) { handlers.uiUpdate.push(cb); },
@@ -145,8 +145,8 @@
     },
   };
 
-  window.oneagent = oneagent;
-  var initFrame = { data_type: "app.init" };
+  window.miniapp = miniapp;
+  var initFrame = { data_type: "app.init", requestId: uuid() };
   if (SESSION_ID) initFrame.sessionId = SESSION_ID;
   post(initFrame);
 })();

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
-import { useWebSocket } from "../hooks/useWebSocket";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { NameInput } from "../components/NameInput";
 import { SessionSidebar } from "../components/SessionSidebar";
@@ -8,8 +7,8 @@ import { ChatMessages, type ChatMsg, type DebugEvent } from "../components/ChatM
 import { ChatInput } from "../components/ChatInput";
 import { MiniappOverlay } from "../components/MiniappOverlay";
 import { ChatDebugModal } from "../components/ChatDebugModal";
-
-const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+import { runChatAction } from "./chatTransport";
+import type { DownFrame } from "../types";
 
 function getCookie(name: string): string {
   const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
@@ -43,11 +42,11 @@ export function ChatPage() {
   const streamBuf = useRef<ChatMsg | null>(null);
   const streamEvents = useRef<DebugEvent[]>([]);
   const requestIdRef = useRef("");
+  const chatAbortRef = useRef<AbortController | null>(null);
 
-  const onDown = useCallback((data: any) => {
-    const dt = data.data_type || data.type;
-    if (dt !== "chat.event") return;
-    const ev = data.data;
+  const handleChatEvent = useCallback((frame: DownFrame) => {
+    if (frame.data_type !== "chat.event") return;
+    const ev = frame.data;
 
     if (ev.type !== "done") {
       streamEvents.current.push({
@@ -85,12 +84,13 @@ export function ChatPage() {
     };
 
     if (ev.type === "text") {
-      const delta = ev.payload?.delta || "";
+      const delta = (ev.payload?.delta as string) || "";
       ensureBuf();
       streamBuf.current!.content += delta;
       updateStreamMsg();
     } else if (ev.type === "tool_call" && ev.payload?.name === "show_miniapp_entry") {
-      const appId = ev.payload?.arguments?.app_id || "";
+      const args = ev.payload?.arguments as Record<string, unknown> | undefined;
+      const appId = (args?.app_id as string) || "";
       if (appId) {
         ensureBuf();
         streamBuf.current!.loadedSkill = appId;
@@ -98,7 +98,7 @@ export function ChatPage() {
       }
     } else if (ev.type === "done") {
       if (streamBuf.current) {
-        streamBuf.current.roundIdx = ev.payload?.roundIdx;
+        streamBuf.current.roundIdx = ev.payload?.roundIdx as number | undefined;
         streamBuf.current.events = [...streamEvents.current];
         updateStreamMsg();
       }
@@ -108,7 +108,7 @@ export function ChatPage() {
     }
   }, []);
 
-  const ws = useWebSocket(WS_URL, onDown);
+  useEffect(() => () => chatAbortRef.current?.abort(), []);
 
   const refreshSessions = useCallback(async () => {
     if (!username) return;
@@ -152,6 +152,7 @@ export function ChatPage() {
 
   const selectSession = useCallback(
     (id: string) => {
+      chatAbortRef.current?.abort();
       setActiveSessionId(id);
       loadHistory(id);
     },
@@ -184,6 +185,7 @@ export function ChatPage() {
   }, []);
 
   const handleLogout = useCallback(() => {
+    chatAbortRef.current?.abort();
     setCookie("chat_username", "", -1);
     setUsername("");
     setSessions([]);
@@ -202,17 +204,38 @@ export function ChatPage() {
       setMessages((prev) => [...prev, userMsg]);
       setStreaming(true);
 
+      chatAbortRef.current?.abort();
+      const controller = new AbortController();
+      chatAbortRef.current = controller;
+
       const rid = `chat_${Date.now()}`;
       requestIdRef.current = rid;
-      ws.send({
-        data_type: "chat.send",
-        sessionId: activeSessionId,
-        intent: text,
-        username,
-        requestId: rid,
+      void runChatAction(
+        {
+          requestId: rid,
+          sessionId: activeSessionId,
+          intent: text,
+          username,
+        },
+        handleChatEvent,
+        controller.signal,
+      ).catch((error) => {
+        if (controller.signal.aborted) return;
+        streamBuf.current = null;
+        streamEvents.current = [];
+        setStreaming(false);
+        const message = error instanceof Error ? error.message : String(error);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg-${++msgCounter}`,
+            role: "assistant",
+            content: `[发送失败] ${message}`,
+          },
+        ]);
       });
     },
-    [activeSessionId, streaming, username, ws],
+    [activeSessionId, streaming, username, handleChatEvent],
   );
 
   const handleSkillClick = useCallback(
@@ -231,7 +254,6 @@ export function ChatPage() {
 
   return (
     <div style={styles.page}>
-      {/* Desktop sidebar */}
       {!isMobile && (
         <SessionSidebar
           sessions={sessions}
@@ -244,7 +266,6 @@ export function ChatPage() {
         />
       )}
 
-      {/* Mobile drawer overlay */}
       {isMobile && sidebarOpen && (
         <div style={styles.drawerOverlay} onClick={() => setSidebarOpen(false)}>
           <div onClick={(e) => e.stopPropagation()}>
@@ -264,7 +285,6 @@ export function ChatPage() {
       )}
 
       <div style={styles.main}>
-        {/* Mobile top bar */}
         {isMobile && (
           <div style={styles.mobileBar}>
             <button style={styles.hamburger} onClick={() => setSidebarOpen(true)}>

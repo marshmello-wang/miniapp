@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -25,6 +26,7 @@ from common.agent_framework.user_interface.inputs import TaskInput, Message
 from common.agent_framework.user_interface.events import Event
 from common.agent_framework.builtin_tools import BashTool, TextEditTool
 from common.agent_framework.builtin_tools.bash_tool import BashResult
+from common.agent_framework.tool_adapter.protocol import ToolResult
 
 from common.lite_tools import ReadFileTool, ListFilesTool, GrepSearchTool, get_system_prompt
 
@@ -32,6 +34,13 @@ from common.agent_framework.agent_loop.hooks import DefaultHook, HookContext, Ho
 
 from .app_registry import AppManifest
 from . import config as cfg
+from . import script_metadata
+from .sandbox import (
+    _script_sdk_path,
+    _subprocess_group_kwargs,
+    _terminate_process_group,
+    _with_pythonpath,
+)
 
 
 # mini-app 场景说明:通过 system prompt 的 extra_context 通道注入
@@ -44,6 +53,11 @@ MINIAPP_EXTRA_CONTEXT = (
 )
 
 
+@dataclass
+class _MiniAppBashResult(BashResult):
+    miniapp_metadata: Optional[Dict[str, Any]] = None
+
+
 class _CwdBashExecutor:
     """LocalBashExecutor with working directory support(仿 lite_code),额外注入 MINIAPP_STORE。"""
 
@@ -52,29 +66,100 @@ class _CwdBashExecutor:
         self._store_dir = store_dir
 
     async def execute(self, command: str, timeout: float) -> BashResult:
-        env = dict(os.environ)
-        if self._store_dir:
-            env["MINIAPP_STORE"] = self._store_dir
-        process = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=self._cwd,
-            env=env,
-        )
+        with script_metadata.result_file() as result_path:
+            env = dict(os.environ)
+            if self._store_dir:
+                env["MINIAPP_STORE"] = self._store_dir
+            env["MINIAPP_RESULT_PATH"] = str(result_path)
+            _with_pythonpath(env, _script_sdk_path())
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=self._cwd,
+                env=env,
+                **_subprocess_group_kwargs(),
+            )
+            process_group = process.pid if os.name == "posix" else None
+            try:
+                stdout_bytes, stderr_bytes = await process.communicate()
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                await _terminate_process_group(process, process_group)
+                raise
+
+            exit_code = process.returncode or 0
+            metadata = None
+            try:
+                if exit_code == 0 and result_path.stat().st_size:
+                    metadata = script_metadata.parse_result_file(result_path)
+            except (script_metadata.MetadataError, OSError) as exc:
+                raise RuntimeError(
+                    f"invalid script metadata: {exc}"
+                ) from exc
+            return _MiniAppBashResult(
+                exit_code=exit_code,
+                stdout=stdout_bytes.decode("utf-8", errors="replace"),
+                stderr=stderr_bytes.decode("utf-8", errors="replace"),
+                miniapp_metadata=metadata,
+            )
+
+
+class MiniAppBashTool(BashTool):
+    """BashTool wrapper that keeps trusted MiniApp metadata out of model text."""
+
+    async def execute(self, parameters, context=None) -> ToolResult:
+        command = parameters.get("command", "")
+        if not command:
+            return ToolResult(
+                tool_name=self.name,
+                success=False,
+                data=None,
+                error="command is required",
+                parameters=parameters,
+            )
+
+        timeout = float(parameters.get("timeout", self._default_timeout))
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(), timeout=timeout,
+            result = await asyncio.wait_for(
+                self._executor.execute(command=command, timeout=timeout),
+                timeout=timeout,
             )
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
-            raise
+            return ToolResult(
+                tool_name=self.name,
+                success=False,
+                data=None,
+                error=f"Command timed out after {timeout}s",
+                metadata={"timeout": timeout, "command": command},
+                parameters=parameters,
+            )
+        except Exception as exc:
+            return ToolResult(
+                tool_name=self.name,
+                success=False,
+                data=None,
+                error=f"Execution failed: {exc}",
+                parameters=parameters,
+            )
 
-        return BashResult(
-            exit_code=process.returncode or 0,
-            stdout=stdout_bytes.decode("utf-8", errors="replace"),
-            stderr=stderr_bytes.decode("utf-8", errors="replace"),
+        stdout = self._truncate(result.stdout)
+        stderr = self._truncate(result.stderr)
+        metadata: Dict[str, Any] = {"exit_code": result.exit_code}
+        if result.exit_code == 0 and result.miniapp_metadata is not None:
+            metadata["miniapp"] = result.miniapp_metadata
+        return ToolResult(
+            tool_name=self.name,
+            success=True,
+            data={
+                "exit_code": result.exit_code,
+                "stdout": stdout,
+                "stderr": stderr,
+            },
+            formatted_data=self._format_output(
+                result.exit_code, stdout, stderr
+            ),
+            metadata=metadata,
+            parameters=parameters,
         )
 
 
@@ -190,38 +275,17 @@ class _MiniappContextStrategy(DefaultContextStrategy):
 
 
 class _AgentSignalHook(DefaultHook):
-    """解析 bash stdout 中的 agentSignal，支持 CLI 脚本声明式控制 react 循环。
-
-    脚本在 stdout JSON 中输出 "agentSignal": "end_turn" 即可终止本轮。
-    """
+    """Honor trusted agentSignal metadata from the MiniApp Bash tool."""
 
     def after_tool_execution(self, ctx: HookContext) -> HookResult:
         if ctx.current_tool_name != "bash" or not ctx.current_tool_result:
             return HookResult.continue_execution()
-        stdout = ctx.current_tool_result.data
-        if not isinstance(stdout, str):
-            stdout = getattr(ctx.current_tool_result.data, "stdout", "") if ctx.current_tool_result.data else ""
-        signal = _parse_agent_signal(stdout)
+        metadata = ctx.current_tool_result.metadata or {}
+        miniapp_metadata = metadata.get("miniapp") or {}
+        signal = miniapp_metadata.get("agentSignal")
         if signal == "end_turn":
             return HookResult.stop()
         return HookResult.continue_execution()
-
-
-def _parse_agent_signal(text: str) -> Optional[str]:
-    """从 bash stdout 中提取 agentSignal 字段。"""
-    if "agentSignal" not in text:
-        return None
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or not line.startswith("{"):
-            continue
-        try:
-            obj = json.loads(line)
-            if isinstance(obj, dict) and "agentSignal" in obj:
-                return obj["agentSignal"]
-        except (json.JSONDecodeError, TypeError):
-            continue
-    return None
 
 
 def create_react_agent(
@@ -246,7 +310,7 @@ def create_react_agent(
     tool_registry = ToolRegistry()
 
     bash_executor = _CwdBashExecutor(cwd=workspace_path, store_dir=str(store_dir))
-    tool_registry.register(BashTool(executor=bash_executor))
+    tool_registry.register(MiniAppBashTool(executor=bash_executor))
     tool_registry.register(TextEditTool(working_directory=workspace_path))
     tool_registry.register(ReadFileTool(working_directory=workspace_path))
     tool_registry.register(ListFilesTool(working_directory=workspace_path))

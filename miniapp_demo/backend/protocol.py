@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import json
 import time
 from typing import Any, Dict, Iterable, Iterator, List, Optional
 
@@ -18,23 +17,6 @@ from common.agent_framework.user_interface.content_blocks import (
 )
 
 APP_EMIT_TOOL = "app_emit"
-
-
-def _extract_structured_content(text: str) -> Dict[str, Any] | None:
-    """从 bash 工具的 stdout 中尝试提取 structuredContent(脚本约定输出格式)。"""
-    if "structuredContent" not in text:
-        return None
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or not line.startswith("{"):
-            continue
-        try:
-            obj = json.loads(line)
-            if isinstance(obj, dict) and "structuredContent" in obj:
-                return obj["structuredContent"]
-        except (json.JSONDecodeError, TypeError):
-            continue
-    return None
 
 
 def make_resource_frame(
@@ -66,17 +48,21 @@ def make_event_frame(
     request_id: str,
     seq: int,
     payload: Dict[str, Any],
+    app_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    data = {
+        "type": event_type,
+        "appSession": app_session,
+        "requestId": request_id,
+        "seq": seq,
+        "ts": time.time(),
+        "payload": payload,
+    }
+    if app_id is not None:
+        data["appId"] = app_id
     return {
         "data_type": "app.event",
-        "data": {
-            "type": event_type,
-            "appSession": app_session,
-            "requestId": request_id,
-            "seq": seq,
-            "ts": time.time(),
-            "payload": payload,
-        },
+        "data": data,
     }
 
 
@@ -117,10 +103,6 @@ def _blocks_to_partials(agent_event) -> List[Dict[str, Any]]:
                     continue  # ui_update 已在 tool_call 时产出
                 result = block.result
                 summary = result if isinstance(result, str) else str(result)
-                # bash 脚本输出中如果含有 structuredContent,额外产出 ui_update
-                sc = _extract_structured_content(summary)
-                if sc:
-                    out.append({"type": "ui_update", "payload": {"structuredContent": sc}})
                 out.append({
                     "type": "tool_result",
                     "payload": {
@@ -130,6 +112,15 @@ def _blocks_to_partials(agent_event) -> List[Dict[str, Any]]:
                         "isError": block.is_error,
                     },
                 })
+                if block.tool_name == "bash":
+                    event_metadata = agent_event.metadata or {}
+                    tool_metadata = event_metadata.get("metadata") or {}
+                    miniapp_metadata = tool_metadata.get("miniapp") or {}
+                    for structured in miniapp_metadata.get("uiUpdates") or []:
+                        out.append({
+                            "type": "ui_update",
+                            "payload": {"structuredContent": structured},
+                        })
     elif et == "task_complete":
         out.append({"type": "done", "payload": {"status": "success"}})
     elif et in ("error", "warning"):
@@ -160,10 +151,18 @@ def frames_for_event(
     app_session: str,
     request_id: str,
     seq: SeqCounter,
+    app_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """把单个 agent Event 转成若干 app.event 帧(已编号)。"""
     return [
-        make_event_frame(p["type"], app_session, request_id, seq.next(), p["payload"])
+        make_event_frame(
+            p["type"],
+            app_session,
+            request_id,
+            seq.next(),
+            p["payload"],
+            app_id=app_id,
+        )
         for p in _blocks_to_partials(agent_event)
     ]
 
@@ -173,8 +172,15 @@ def agent_events_to_app_events(
     app_session: str,
     request_id: str,
     seq: SeqCounter,
+    app_id: Optional[str] = None,
 ) -> Iterator[Dict[str, Any]]:
     """把 agent 事件流转成 app.event 帧流(边转边 yield)。不保证一定含 done,由调用方兜底。"""
     for ev in agent_events:
-        for frame in frames_for_event(ev, app_session, request_id, seq):
+        for frame in frames_for_event(
+            ev,
+            app_session,
+            request_id,
+            seq,
+            app_id=app_id,
+        ):
             yield frame

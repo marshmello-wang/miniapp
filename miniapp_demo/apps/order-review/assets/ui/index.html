@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>订单审核</title>
-  <script src="/sdk/oneagent.js"></script>
+  <script src="/sdk/miniapp.js"></script>
   <style>
     :root {
       --ink: #0b1120; --muted: #64748b; --line: #eceff4; --accent: #4f46e5;
@@ -192,7 +192,7 @@
       Array.prototype.forEach.call(document.querySelectorAll("#rows button"), function (b) {
         b.onclick = function () {
           b.disabled = true;
-          oneagent.directAction("approve_order", { orderId: b.getAttribute("data-id") });
+          miniapp.directAction("approve_order", { orderId: b.getAttribute("data-id") });
         };
       });
 
@@ -204,7 +204,7 @@
     }
 
     // ui_update:与现有状态合并(MVP:整份字段覆盖)
-    oneagent.onUiUpdate(function (e) {
+    miniapp.onUiUpdate(function (e) {
       var sc = e.payload.structuredContent || {};
       Object.keys(sc).forEach(function (k) { state[k] = sc[k]; });
       render();
@@ -213,7 +213,7 @@
     // 轨迹:展示 AI 思考 / 正文 / 工具调用
     var trajEl = document.getElementById("traj");
     function showTraj() { trajEl.classList.add("show"); }
-    oneagent.onTrajectory(function (e) {
+    miniapp.onTrajectory(function (e) {
       showTraj();
       if (e.type === "thinking") trajEl.textContent += "🧠 " + (e.payload.delta || "") + "\n";
       else if (e.type === "text") trajEl.textContent += (e.payload.delta || "");
@@ -223,7 +223,7 @@
     });
 
     // 把当前界面状态作为 env 上报给 agent
-    oneagent.setEnv(function () {
+    miniapp.setEnv(function () {
       return { orders: state.orders, stats: state.stats };
     });
 
@@ -231,14 +231,14 @@
       trajEl.textContent = "";
       var intent = document.getElementById("q").value ||
         "分析当前订单的风险并给出审批建议,把结论通过 app_emit 的 aiAnalysis 字段展示。";
-      oneagent.agentAction(intent, {});
+      miniapp.agentAction(intent, {});
     };
 
     // 显示当前预览设备(由客户端运行时通过 ?device= 注入)
-    document.getElementById("dev").textContent = oneagent.device;
+    document.getElementById("dev").textContent = miniapp.device;
 
     // 进入即加载订单
-    oneagent.directAction("list_orders", {});
+    miniapp.directAction("list_orders", {});
     render();
   </script>
 </body>

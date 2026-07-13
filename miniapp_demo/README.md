@@ -10,24 +10,27 @@
 ```
 前端 React(客户端运行时 Host)         后端 FastAPI(小程序引擎)
 ┌─────────────┬───────────────┐        ┌───────────────────────────┐
-│ 小程序列表   │  iframe/编辑器 │        │ ws_handler  真流式收发      │
-│ AppList     │  AppFrame      │  WS    │ engine      会话/路由/协议  │
-│ 编辑器       │  SkillEditor   │◄─────► │ sandbox     本地脚本执行    │
-│ Debug 面板   │  DebugPanel    │  REST  │ agent_runner ReactAgent    │
-│ Host Bridge (postMessage↔WS) │        │ stores  MessageStore+业务   │
-└─────────────┴───────────────┘        └───────────────────────────┘
+│ 小程序列表   │  iframe/编辑器 │        │ runtime_router POST+SSE   │
+│ AppList     │  AppFrame      │  POST  │ runtime_service 请求调度  │
+│ 编辑器       │  SkillEditor   │──────► │ engine      会话/路由/协议  │
+│ Debug 面板   │  DebugPanel    │  SSE   │ sandbox     本地脚本执行    │
+│ Host Bridge (postMessage↔HTTP)│◄────── │ agent_runner ReactAgent    │
+└─────────────┴───────────────┘        │ stores  MessageStore+业务   │
+                                       └───────────────────────────┘
 ```
 
-- **direct_action**:`app.call{name,args}` → 引擎按 `app.yaml.scripts[]` 找到脚本 → sandbox 子进程执行 → `ui_update` + `done`,并把交互写入历史(`app.action`)。
-- **agent_action**:`app.agent{intent,focus,env}` → 引擎读历史 + 注入界面状态 → `ReactAgent`(真 LLM,带 `bash` 和 `app_emit` 工具)→ 逐 `Event` 流式转成 `thinking/text/tool_call/tool_result/ui_update/done`。
+- **direct_action**:`POST app.call{name,args}` → 引擎按 `app.yaml.scripts[]` 找到脚本 → sandbox 子进程执行 → 响应流返回 `ui_update*` + `done`。
+- **agent_action**:`POST app.agent{intent,focus,env}` → 引擎读历史 + 注入界面状态 → `ReactAgent`(真 LLM,带 `bash` 和 `app_emit` 工具)→ 同一响应流返回 `thinking/text/tool_call/tool_result/ui_update/done`。
+- **脚本 UI 更新**:应用脚本通过 `miniapp_runtime.emit_ui()` 写入 `MINIAPP_RESULT_PATH` 临时结果文件;Runtime 在 Bash 完成后读取 metadata,转成 `ui_update`;stdout 仅作为普通工具输出。
 - **app_emit**:agent 调用该工具即产生 `ui_update`(把 `structuredContent` 推到界面)。
 
 ## 目录
 
 ```
 miniapp_demo/
-├── backend/           FastAPI 引擎(config/registry/stores/sandbox/protocol/runner/engine/ws/routers)
-├── sdk/oneagent.js    widget 侧 Bridge SDK(iframe 内引入)
+├── backend/           FastAPI 引擎(config/registry/stores/sandbox/protocol/runner/engine/runtime/routers)
+├── script_sdk/        脚本侧 metadata SDK(miniapp_runtime.py)
+├── sdk/miniapp.js    widget 侧 Bridge SDK(iframe 内引入)
 ├── apps/order-review/ 种子示例小程序
 └── frontend/          Vite + React + TS(三栏:列表 / iframe·编辑器 / Debug)
 ```
@@ -74,11 +77,8 @@ cd miniapp_demo
 
 | 方向 | 帧 | 说明 |
 | --- | --- | --- |
-| 上行 | `app.init{appId}` | 挂载握手 |
-| 上行 | `app.call{name,args}` | direct_action |
-| 上行 | `app.agent{intent,focus,env}` | agent_action |
-| 上行 | `cancel{requestId}` | 取消 |
-| 下行 | `app.resource` | 挂载资源(UI url) |
-| 下行 | `app.event{type,payload}` | `type ∈ thinking\|text\|tool_call\|tool_result\|ui_update\|done` |
+| 上行 | `POST /api/runtime/actions` | `app.init` / `app.call` / `app.agent` / `chat.send` |
+| 上行 | `POST /api/runtime/actions/{requestId}/cancel` | 取消仍在执行的 Action |
+| 下行 | 同一 POST 的 `text/event-stream` | `app.resource` / `app.event` / `chat.event` 直到 `done` |
 
 本 demo 为 MVP:单用户 `local`,`ui_update` 走全量(界面侧做字段合并),未做安全护栏 / 增量 patch / 断线续传。

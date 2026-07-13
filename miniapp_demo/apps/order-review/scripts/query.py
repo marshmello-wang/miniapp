@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""list_orders: 读取业务 store 中的订单,输出 structuredContent。"""
+"""list_orders: 读取业务 store 中的订单并更新小程序界面。"""
 import json
 import os
+
+from miniapp_runtime import emit_ui
 
 
 def main() -> None:
@@ -21,7 +23,14 @@ def main() -> None:
         "approved": sum(1 for o in all_orders if o["status"] == "approved"),
         "amount_pending": sum(o["amount"] for o in all_orders if o["status"] == "pending"),
     }
-    print(json.dumps({"structuredContent": {"orders": orders, "stats": stats}}, ensure_ascii=False))
+    emit_ui({"orders": orders, "stats": stats})
+
+    print(f"查询到 {len(orders)} 笔订单（全部订单共 {len(all_orders)} 笔）。")
+    for order in orders:
+        print(
+            f"- {order['id']} | {order['customer']} | 金额 {order['amount']} | "
+            f"风险 {order['risk']} | 状态 {order['status']}"
+        )
 
 
 if __name__ == "__main__":

@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Routes, Route } from "react-router-dom";
 import { api } from "./api/client";
 import { HostBridge } from "./host/bridge";
-import { useWebSocket } from "./hooks/useWebSocket";
 import type { AppInfo, DebugFrame } from "./types";
 import { AppList } from "./components/AppList";
 import { AppFrame } from "./components/AppFrame";
@@ -19,30 +18,25 @@ type View =
   | { type: "edit"; appId: string }
   | { type: "settings" };
 
-const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
-
 function Workbench() {
   const [apps, setApps] = useState<AppInfo[]>([]);
   const [view, setView] = useState<View>({ type: "empty" });
   const [debug, setDebug] = useState<DebugFrame[]>([]);
   const [showNew, setShowNew] = useState(false);
 
-  const sendRef = useRef<(f: any) => void>(() => {});
   const bridgeRef = useRef<HostBridge | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
-  const onDown = useCallback((data: any) => {
-    bridgeRef.current?.handleDownFrame(data);
-  }, []);
-
-  const ws = useWebSocket(WS_URL, onDown);
-  sendRef.current = ws.send;
-
-  if (!bridgeRef.current) {
-    bridgeRef.current = new HostBridge(
-      (frame) => sendRef.current(frame),
-      (f) => setDebug((prev) => [...prev, f])
+  useLayoutEffect(() => {
+    const bridge = new HostBridge((f) =>
+      setDebug((prev) => [...prev, f]),
     );
-  }
+    bridgeRef.current = bridge;
+    return () => {
+      bridge.dispose();
+      if (bridgeRef.current === bridge) bridgeRef.current = null;
+    };
+  }, []);
 
   const refreshApps = useCallback(async () => {
     setApps(await api.listApps());
@@ -52,16 +46,23 @@ function Workbench() {
     refreshApps();
   }, [refreshApps]);
 
-  useEffect(() => {
-    const bridge = bridgeRef.current!;
+  useLayoutEffect(() => {
+    const bridge = bridgeRef.current;
+    if (!bridge) return;
     if (view.type === "run") {
       bridge.setApp(view.appId);
+      bridge.setIframe(iframeRef.current);
       setDebug([]);
     } else {
       bridge.setApp(null);
       bridge.setIframe(null);
     }
   }, [view]);
+
+  const setIframe = useCallback((iframe: HTMLIFrameElement | null) => {
+    iframeRef.current = iframe;
+    bridgeRef.current?.setIframe(iframe);
+  }, []);
 
   const selectedId = view.type === "run" || view.type === "edit" ? view.appId : null;
 
@@ -71,7 +72,7 @@ function Workbench() {
         return (
           <AppFrame
             appId={view.appId}
-            onIframe={(el) => bridgeRef.current?.setIframe(el)}
+            onIframe={setIframe}
             onEdit={() => setView({ type: "edit", appId: view.appId })}
           />
         );
@@ -90,7 +91,7 @@ function Workbench() {
           </div>
         );
     }
-  }, [view]);
+  }, [setIframe, view]);
 
   return (
     <div className="layout">
@@ -120,8 +121,8 @@ function Workbench() {
           </button>
         </div>
         <div className="conn-strip">
-          <span className={`status-dot ${ws.connected ? "on" : "off"}`} />
-          {ws.connected ? "已连接引擎" : "连接中…"}
+          <span className="status-dot on" />
+          POST / SSE 就绪
         </div>
       </div>
 

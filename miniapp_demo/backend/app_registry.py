@@ -215,17 +215,20 @@ def create_app(name: str, description: str = "") -> AppManifest:
         f"# {name}\n\n{description or '一个新的小程序。'}\n\n"
         "## 能力\n\n"
         "- 通过 `bash` 运行 `scripts/` 下的脚本处理业务数据。\n"
-        "- 通过 `app_emit` 把结果 `structuredContent` 推送到小程序界面。\n",
+        "- 应用脚本通过 `miniapp_runtime` 的 `emit_ui` 更新小程序界面；"
+        "stdout 只输出供 Agent 阅读的普通摘要。\n"
+        "- Agent 需要直接更新界面时使用 `app_emit`。\n",
         encoding="utf-8",
     )
 
     (root / "scripts" / "hello.py").write_text(
         '#!/usr/bin/env python3\n'
-        '"""direct_action 示例脚本：输出一段 structuredContent。"""\n'
-        "import json\n\n"
-        "print(json.dumps({\"structuredContent\": {\"message\": \"hello from "
+        '"""direct_action 示例脚本：通过 MiniApp Runtime 更新界面。"""\n'
+        "from miniapp_runtime import emit_ui\n\n"
+        "emit_ui({\"message\": \"hello from "
         + app_id
-        + "\"}}))\n",
+        + "\"})\n"
+        "print(\"hello action completed\")\n",
         encoding="utf-8",
     )
 
@@ -242,7 +245,7 @@ _STARTER_UI = """<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{APP_NAME}}</title>
-  <script src="/sdk/oneagent.js"></script>
+  <script src="/sdk/miniapp.js"></script>
   <style>
     :root { --accent-grad: linear-gradient(135deg,#6366f1,#8b5cf6); --line:#eceff4; --muted:#64748b; }
     * { box-sizing: border-box; }
@@ -303,8 +306,8 @@ _STARTER_UI = """<!doctype html>
   <script>
     const dataEl = document.getElementById('data');
     const trajEl = document.getElementById('traj');
-    oneagent.onUiUpdate((e) => { dataEl.textContent = JSON.stringify(e.payload.structuredContent, null, 2); });
-    oneagent.onTrajectory((e) => {
+    miniapp.onUiUpdate((e) => { dataEl.textContent = JSON.stringify(e.payload.structuredContent, null, 2); });
+    miniapp.onTrajectory((e) => {
       if (e.type === 'thinking') trajEl.textContent += '[think] ' + (e.payload.delta || '') + '\\n';
       else if (e.type === 'text') trajEl.textContent += (e.payload.delta || '');
       else if (e.type === 'tool_call') trajEl.textContent += '\\n[tool] ' + e.payload.name + ' ' + JSON.stringify(e.payload.arguments) + '\\n';
@@ -312,12 +315,12 @@ _STARTER_UI = """<!doctype html>
     });
     document.getElementById('hello').onclick = () => {
       trajEl.textContent = '';
-      oneagent.directAction('hello', {}, { onData: (e) => { dataEl.textContent = JSON.stringify(e.payload.structuredContent, null, 2); } });
+      miniapp.directAction('hello', {}, { onData: (e) => { dataEl.textContent = JSON.stringify(e.payload.structuredContent, null, 2); } });
     };
     document.getElementById('ask').onclick = () => {
       trajEl.textContent = '';
       const intent = document.getElementById('intent').value;
-      oneagent.agentAction(intent, {});
+      miniapp.agentAction(intent, {});
     };
   </script>
 </body>

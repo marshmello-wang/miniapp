@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>神秘占卜</title>
-  <script src="/sdk/oneagent.js"></script>
+  <script src="/sdk/miniapp.js"></script>
   <style>
     :root {
       --ink: #ece7ff;
@@ -505,7 +505,7 @@
       orbEl.style.background = _defaultOrb;
     }
 
-    oneagent.onUiUpdate(function (e) {
+    miniapp.onUiUpdate(function (e) {
       var sc = (e.payload && e.payload.structuredContent) || {};
       var phase = sc.phase;
       hideLoading();
@@ -534,7 +534,7 @@
       showView('idle');
       showLoading();
 
-      oneagent.agentAction(text, { phase: currentPhase }, {
+      miniapp.agentAction(text, { phase: currentPhase }, {
         onTrajectory: function (e) {
           if (e.type === 'text' && e.payload && e.payload.delta) {
             got = true;
@@ -597,7 +597,7 @@
     function transcribe(blob) {
       if (!blob || !blob.size) return;
       toast('聆听你的话语……');
-      oneagent.transcribe(blob, 'voice.webm').then(function (text) {
+      miniapp.transcribe(blob, 'voice.webm').then(function (text) {
         text = (text || '').trim(); if (!text) { toast('没有听清，请再说一次'); return; }
         ask(text);
       }).catch(function (err) { toast((err && err.message) ? String(err.message) : '语音识别失败'); });
@@ -618,11 +618,11 @@
     refreshIcon();
     showView('idle');
 
-    oneagent.setEnv(function () {
+    miniapp.setEnv(function () {
       return { app: 'fortune-teller', phase: currentPhase };
     });
 
-    oneagent.onInit(function (message) {
+    miniapp.onInit(function (message) {
       ask(message);
     });
 
@@ -643,7 +643,7 @@
       histOverlayEl.className = 'hist-overlay';
       histOverlayEl.innerHTML = '<div class="hist-body"><div class="hist-title">对话记录</div><div class="hist-empty">加载中…</div></div><button class="hist-close" id="histCloseBtn">收起历史 ↑</button>';
       document.getElementById('histCloseBtn').onclick = closeHistory;
-      oneagent.getHistory().then(renderHistory);
+      miniapp.getHistory().then(renderHistory);
     }
 
     function closeHistory() {
