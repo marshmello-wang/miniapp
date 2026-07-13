@@ -3,14 +3,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from . import config
-from .routers import apps_router, asr_router, chat_router, config_router, files_router
-from .ws_handler import handle_ws
-
+from .routers import (
+    apps_router,
+    asr_router,
+    chat_router,
+    config_router,
+    files_router,
+    runtime_router,
+)
 app = FastAPI(title="MiniApp Framework Demo")
 
 app.add_middleware(
@@ -26,6 +31,7 @@ app.include_router(chat_router.router)
 app.include_router(files_router.router)
 app.include_router(config_router.router)
 app.include_router(asr_router.router)
+app.include_router(runtime_router.router)
 
 
 @app.on_event("startup")
@@ -33,6 +39,11 @@ def _startup() -> None:
     config.ensure_directories()
     config.load_config()
     config.seed_bundled_apps()
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    await runtime_router.runtime_service.shutdown()
 
 
 @app.get("/health")
@@ -46,11 +57,6 @@ def serve_sdk(filename: str):
     if config.SDK_DIR.resolve() not in target.parents or not target.is_file():
         raise HTTPException(404, "sdk file not found")
     return FileResponse(str(target), media_type="application/javascript")
-
-
-@app.websocket("/ws")
-async def ws_endpoint(websocket: WebSocket):
-    await handle_ws(websocket)
 
 
 # ---------- SPA static file serving (production) ----------

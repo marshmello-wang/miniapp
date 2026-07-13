@@ -3,9 +3,10 @@ import { useCallback, useRef, useState } from "react";
 interface Props {
   onSend: (text: string) => void;
   disabled?: boolean;
+  isMobile?: boolean;
 }
 
-export function ChatInput({ onSend, disabled }: Props) {
+export function ChatInput({ onSend, disabled, isMobile }: Props) {
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -28,7 +29,7 @@ export function ChatInput({ onSend, disabled }: Props) {
   );
 
   return (
-    <div style={styles.bar}>
+    <div style={{ ...styles.bar, ...(isMobile ? styles.barMobile : {}) }}>
       <div style={styles.inputWrap}>
         <textarea
           ref={inputRef}
@@ -60,6 +61,9 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "12px 24px 20px",
     borderTop: "1px solid #f0f0f0",
     background: "#fff",
+  },
+  barMobile: {
+    padding: "8px 12px 12px",
   },
   inputWrap: {
     display: "flex", alignItems: "flex-end", gap: 8,

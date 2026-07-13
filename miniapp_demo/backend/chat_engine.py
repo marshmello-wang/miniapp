@@ -31,7 +31,7 @@ class ChatEngine:
         task_id = f"chat_{uuid4().hex[:12]}"
         trajectory: List[Dict[str, Any]] = []
         ai_text_parts: List[str] = []
-        saw_done = False
+        terminal_frame: Optional[Dict[str, Any]] = None
         error_text: Optional[str] = None
 
         _INTERNAL_EVENTS = frozenset((
@@ -57,28 +57,29 @@ class ChatEngine:
             for frame in frames:
                 frame["data_type"] = "chat.event"
                 if frame["data"]["type"] == "done":
-                    saw_done = True
                     frame["data"]["payload"]["roundIdx"] = round_idx
-                yield frame
+                    terminal_frame = frame
+                else:
+                    yield frame
 
         if error_text is not None:
             yield _chat_frame(protocol.make_event_frame(
                 "text", session_id, request_id, seq.next(),
                 {"delta": f"[error] {error_text}", "final": True},
             ))
-            yield _chat_frame(protocol.make_event_frame(
+            terminal_frame = _chat_frame(protocol.make_event_frame(
                 "done", session_id, request_id, seq.next(),
                 {"status": "error", "error": error_text, "roundIdx": round_idx},
             ))
-            saw_done = True
-        elif not saw_done:
-            yield _chat_frame(protocol.make_event_frame(
+        elif terminal_frame is None:
+            terminal_frame = _chat_frame(protocol.make_event_frame(
                 "done", session_id, request_id, seq.next(),
                 {"status": "success", "roundIdx": round_idx},
             ))
 
         ai_text = "".join(ai_text_parts).strip() or "(no text output)"
         stores.complete_round(session_id, round_idx, ai_text, trajectory=trajectory)
+        yield terminal_frame
 
     async def _stream_chat(
         self,
@@ -90,28 +91,53 @@ class ChatEngine:
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
         sentinel = object()
+        stop_event = threading.Event()
 
         store_dir = str(stores.business_store_dir(session_id))
 
+        def offer(item) -> None:
+            if not stop_event.is_set():
+                queue.put_nowait(item)
+
         def worker():
+            source = None
             try:
-                for ev in run_chat_agent(
+                source = run_chat_agent(
                     session_id, task_id, user_message, history,
                     store_dir=store_dir,
-                ):
-                    loop.call_soon_threadsafe(queue.put_nowait, ev)
+                )
+                iterator = iter(source)
+                while not stop_event.is_set():
+                    try:
+                        ev = next(iterator)
+                    except StopIteration:
+                        break
+                    if stop_event.is_set():
+                        break
+                    loop.call_soon_threadsafe(offer, ev)
             except Exception as exc:  # noqa: BLE001
-                loop.call_soon_threadsafe(queue.put_nowait, ("__error__", exc))
+                if not stop_event.is_set():
+                    loop.call_soon_threadsafe(offer, ("__error__", exc))
             finally:
-                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+                close = getattr(source, "close", None)
+                if close is not None:
+                    try:
+                        close()
+                    except Exception:
+                        pass
+                if not stop_event.is_set():
+                    loop.call_soon_threadsafe(offer, sentinel)
 
         threading.Thread(target=worker, daemon=True).start()
 
-        while True:
-            item = await queue.get()
-            if item is sentinel:
-                break
-            yield item
+        try:
+            while True:
+                item = await queue.get()
+                if item is sentinel:
+                    break
+                yield item
+        finally:
+            stop_event.set()
 
 
 def _chat_frame(frame: Dict[str, Any]) -> Dict[str, Any]:

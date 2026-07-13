@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""占卜师出题 CLI：读取 MINIAPP_ARGS 中的题目数据，输出 structuredContent。
+"""占卜师出题 CLI：读取 MINIAPP_ARGS 中的题目数据并更新小程序界面。
 
 Agent 调用示例：
   MINIAPP_ARGS='{"text":"你更看重什么？","type":"choice","options":["A","B"]}' python3 scripts/show_question.py
@@ -13,13 +13,15 @@ import json
 import os
 import sys
 
+from miniapp_runtime import emit_ui, end_turn
+
 
 def main():
     raw = os.environ.get("MINIAPP_ARGS", "{}")
     try:
         args = json.loads(raw)
     except json.JSONDecodeError:
-        print(json.dumps({"error": "invalid MINIAPP_ARGS JSON"}))
+        print("错误：MINIAPP_ARGS 不是有效 JSON", file=sys.stderr)
         sys.exit(1)
 
     text = args.get("text", "")
@@ -27,7 +29,7 @@ def main():
     options = args.get("options", [])
 
     if not text:
-        print(json.dumps({"error": "missing question text"}))
+        print("错误：缺少题目文字", file=sys.stderr)
         sys.exit(1)
 
     question = {
@@ -37,14 +39,9 @@ def main():
     if q_type == "choice" and options:
         question["options"] = options
 
-    output = {
-        "structuredContent": {
-            "phase": "question",
-            "question": question,
-        },
-        "agentSignal": "end_turn",
-    }
-    print(json.dumps(output, ensure_ascii=False))
+    emit_ui({"phase": "question", "question": question})
+    end_turn()
+    print(f"已向界面展示题目：{text}")
 
 
 if __name__ == "__main__":

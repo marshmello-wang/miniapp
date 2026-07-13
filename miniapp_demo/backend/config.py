@@ -92,7 +92,7 @@ def ensure_directories() -> None:
 
 
 def seed_bundled_apps() -> None:
-    """首启时把随仓库自带的示例小程序拷贝到 ~/.miniapp/apps（已存在则跳过）。"""
+    """每次启动时把随仓库自带的示例小程序同步到 ~/.miniapp/apps。"""
     ensure_directories()
     if not BUNDLED_APPS_DIR.is_dir():
         return
@@ -100,8 +100,9 @@ def seed_bundled_apps() -> None:
         if not src.is_dir():
             continue
         dst = APPS_DIR / src.name
-        if not dst.exists():
-            shutil.copytree(src, dst)
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
 
 
 def _fill_missing(target: Dict[str, Any], defaults: Dict[str, Any]) -> bool:

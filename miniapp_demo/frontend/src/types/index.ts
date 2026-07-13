@@ -30,16 +30,117 @@ export interface AppManifest {
   permissions: string[];
 }
 
-export interface DownFrame {
-  data_type: string;
-  data?: any;
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue =
+  | JsonPrimitive
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+interface ActionFrameBase {
+  requestId: string;
+}
+
+export interface AppInitActionFrame extends ActionFrameBase {
+  data_type: "app.init";
+  appId: string;
+  sessionId?: string;
+}
+
+export interface AppCallActionFrame extends ActionFrameBase {
+  data_type: "app.call";
+  appId: string;
+  sessionId?: string;
+  name: string;
+  args?: Record<string, JsonValue>;
+}
+
+export interface AppAgentActionFrame extends ActionFrameBase {
+  data_type: "app.agent";
+  appId: string;
+  sessionId?: string;
+  intent?: string;
+  focus?: JsonValue;
+  env?: Record<string, JsonValue>;
+}
+
+export interface ChatSendActionFrame extends ActionFrameBase {
+  data_type: "chat.send";
+  sessionId: string;
+  intent?: string;
+  username?: string;
+}
+
+export type ActionFrame =
+  | AppInitActionFrame
+  | AppCallActionFrame
+  | AppAgentActionFrame
+  | ChatSendActionFrame;
+
+export interface EventData {
+  type: string;
+  requestId: string;
+  seq?: number;
+  ts?: number;
+  appId?: string;
+  appSession?: string;
+  payload?: Record<string, JsonValue>;
+}
+
+export interface AppEventFrame {
+  data_type: "app.event";
+  data: EventData;
+}
+
+export interface ChatEventFrame {
+  data_type: "chat.event";
+  data: EventData;
+}
+
+export interface AppResourceApp {
+  id: string;
+  name: string;
+  version: string;
+  [key: string]: JsonValue;
+}
+
+export interface AppResourceDescriptor {
+  uri: string;
+  mimeType: string;
+  [key: string]: JsonValue;
+}
+
+export interface AppResourceData {
+  requestId: string;
+  appId: string;
+  appSession: string;
+  seq?: number;
+  app: AppResourceApp;
+  resource: AppResourceDescriptor;
+  [key: string]: JsonValue | undefined;
+}
+
+export interface AppResourceFrame {
+  data_type: "app.resource";
+  data: AppResourceData;
+}
+
+export type DownFrame = AppEventFrame | ChatEventFrame | AppResourceFrame;
+
+export interface DebugPayload {
+  data_type?: string;
+  type?: string;
+  data?: {
+    type?: string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
 }
 
 export interface DebugFrame {
   data_type: "debug";
   dir: "up" | "down";
   ts: number;
-  frame: any;
+  frame: DebugPayload;
 }
 
 export interface FileNode {

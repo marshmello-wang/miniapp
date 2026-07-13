@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
-import { useWebSocket } from "../hooks/useWebSocket";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { NameInput } from "../components/NameInput";
 import { SessionSidebar } from "../components/SessionSidebar";
 import { ChatMessages, type ChatMsg, type DebugEvent } from "../components/ChatMessages";
 import { ChatInput } from "../components/ChatInput";
 import { MiniappOverlay } from "../components/MiniappOverlay";
 import { ChatDebugModal } from "../components/ChatDebugModal";
-
-const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+import { runChatAction } from "./chatTransport";
+import type { DownFrame } from "../types";
 
 function getCookie(name: string): string {
   const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
@@ -29,6 +29,7 @@ interface Session {
 let msgCounter = 0;
 
 export function ChatPage() {
+  const isMobile = useIsMobile();
   const [username, setUsername] = useState(() => getCookie("chat_username"));
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -36,15 +37,16 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [overlay, setOverlay] = useState<{ appId: string; sessionId: string } | null>(null);
   const [debugMsg, setDebugMsg] = useState<ChatMsg | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const streamBuf = useRef<ChatMsg | null>(null);
   const streamEvents = useRef<DebugEvent[]>([]);
   const requestIdRef = useRef("");
+  const chatAbortRef = useRef<AbortController | null>(null);
 
-  const onDown = useCallback((data: any) => {
-    const dt = data.data_type || data.type;
-    if (dt !== "chat.event") return;
-    const ev = data.data;
+  const handleChatEvent = useCallback((frame: DownFrame) => {
+    if (frame.data_type !== "chat.event") return;
+    const ev = frame.data;
 
     if (ev.type !== "done") {
       streamEvents.current.push({
@@ -82,12 +84,13 @@ export function ChatPage() {
     };
 
     if (ev.type === "text") {
-      const delta = ev.payload?.delta || "";
+      const delta = (ev.payload?.delta as string) || "";
       ensureBuf();
       streamBuf.current!.content += delta;
       updateStreamMsg();
     } else if (ev.type === "tool_call" && ev.payload?.name === "show_miniapp_entry") {
-      const appId = ev.payload?.arguments?.app_id || "";
+      const args = ev.payload?.arguments as Record<string, unknown> | undefined;
+      const appId = (args?.app_id as string) || "";
       if (appId) {
         ensureBuf();
         streamBuf.current!.loadedSkill = appId;
@@ -95,7 +98,7 @@ export function ChatPage() {
       }
     } else if (ev.type === "done") {
       if (streamBuf.current) {
-        streamBuf.current.roundIdx = ev.payload?.roundIdx;
+        streamBuf.current.roundIdx = ev.payload?.roundIdx as number | undefined;
         streamBuf.current.events = [...streamEvents.current];
         updateStreamMsg();
       }
@@ -105,17 +108,24 @@ export function ChatPage() {
     }
   }, []);
 
-  const ws = useWebSocket(WS_URL, onDown);
+  useEffect(() => () => chatAbortRef.current?.abort(), []);
 
   const refreshSessions = useCallback(async () => {
     if (!username) return;
     const list = await api.listChatSessions(username);
     setSessions(list);
+    return list;
   }, [username]);
 
   useEffect(() => {
-    refreshSessions();
-  }, [refreshSessions]);
+    refreshSessions().then((list) => {
+      if (list && list.length > 0 && !activeSessionId) {
+        const latest = list[0];
+        setActiveSessionId(latest.session_id);
+        loadHistory(latest.session_id);
+      }
+    });
+  }, [refreshSessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadHistory = useCallback(async (sessionId: string) => {
     const hist = await api.getChatHistory(sessionId);
@@ -142,6 +152,7 @@ export function ChatPage() {
 
   const selectSession = useCallback(
     (id: string) => {
+      chatAbortRef.current?.abort();
       setActiveSessionId(id);
       loadHistory(id);
     },
@@ -174,6 +185,7 @@ export function ChatPage() {
   }, []);
 
   const handleLogout = useCallback(() => {
+    chatAbortRef.current?.abort();
     setCookie("chat_username", "", -1);
     setUsername("");
     setSessions([]);
@@ -192,17 +204,38 @@ export function ChatPage() {
       setMessages((prev) => [...prev, userMsg]);
       setStreaming(true);
 
+      chatAbortRef.current?.abort();
+      const controller = new AbortController();
+      chatAbortRef.current = controller;
+
       const rid = `chat_${Date.now()}`;
       requestIdRef.current = rid;
-      ws.send({
-        data_type: "chat.send",
-        sessionId: activeSessionId,
-        intent: text,
-        username,
-        requestId: rid,
+      void runChatAction(
+        {
+          requestId: rid,
+          sessionId: activeSessionId,
+          intent: text,
+          username,
+        },
+        handleChatEvent,
+        controller.signal,
+      ).catch((error) => {
+        if (controller.signal.aborted) return;
+        streamBuf.current = null;
+        streamEvents.current = [];
+        setStreaming(false);
+        const message = error instanceof Error ? error.message : String(error);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg-${++msgCounter}`,
+            role: "assistant",
+            content: `[发送失败] ${message}`,
+          },
+        ]);
       });
     },
-    [activeSessionId, streaming, username, ws],
+    [activeSessionId, streaming, username, handleChatEvent],
   );
 
   const handleSkillClick = useCallback(
@@ -217,32 +250,70 @@ export function ChatPage() {
     return <NameInput onSubmit={handleLogin} />;
   }
 
+  const activeTitle = sessions.find((s) => s.session_id === activeSessionId)?.title || "对话";
+
   return (
     <div style={styles.page}>
-      <SessionSidebar
-        sessions={sessions}
-        activeId={activeSessionId}
-        username={username}
-        onSelect={selectSession}
-        onCreate={createSession}
-        onDelete={deleteSession}
-        onLogout={handleLogout}
-      />
+      {!isMobile && (
+        <SessionSidebar
+          sessions={sessions}
+          activeId={activeSessionId}
+          username={username}
+          onSelect={selectSession}
+          onCreate={createSession}
+          onDelete={deleteSession}
+          onLogout={handleLogout}
+        />
+      )}
+
+      {isMobile && sidebarOpen && (
+        <div style={styles.drawerOverlay} onClick={() => setSidebarOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <SessionSidebar
+              sessions={sessions}
+              activeId={activeSessionId}
+              username={username}
+              isMobile
+              onSelect={selectSession}
+              onCreate={createSession}
+              onDelete={deleteSession}
+              onLogout={handleLogout}
+              onClose={() => setSidebarOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
       <div style={styles.main}>
+        {isMobile && (
+          <div style={styles.mobileBar}>
+            <button style={styles.hamburger} onClick={() => setSidebarOpen(true)}>
+              ☰
+            </button>
+            <span style={styles.mobileTitle}>
+              {activeSessionId ? activeTitle : "选择对话"}
+            </span>
+            <button style={styles.mobileNewBtn} onClick={createSession}>+</button>
+          </div>
+        )}
+
         {activeSessionId ? (
           <>
             <ChatMessages
               messages={messages}
               streaming={streaming}
+              isMobile={isMobile}
               onSkillClick={handleSkillClick}
               onDebug={setDebugMsg}
             />
-            <ChatInput onSend={sendMessage} disabled={streaming} />
+            <ChatInput onSend={sendMessage} disabled={streaming} isMobile={isMobile} />
           </>
         ) : (
           <div style={styles.placeholder}>
             <div style={styles.placeholderIcon}>💬</div>
-            <div style={styles.placeholderText}>选择一个对话或创建新对话</div>
+            <div style={styles.placeholderText}>
+              {isMobile ? "点击左上角 ☰ 选择或创建对话" : "选择一个对话或创建新对话"}
+            </div>
           </div>
         )}
       </div>
@@ -279,6 +350,7 @@ const styles: Record<string, React.CSSProperties> = {
     flex: 1,
     display: "flex", flexDirection: "column",
     overflow: "hidden",
+    minWidth: 0,
   },
   placeholder: {
     flex: 1, display: "flex", flexDirection: "column",
@@ -287,4 +359,31 @@ const styles: Record<string, React.CSSProperties> = {
   },
   placeholderIcon: { fontSize: 56, marginBottom: 16 },
   placeholderText: { fontSize: 16, color: "#bbb" },
+  drawerOverlay: {
+    position: "fixed", inset: 0, zIndex: 1000,
+    background: "rgba(0,0,0,0.35)",
+    display: "flex",
+  },
+  mobileBar: {
+    display: "flex", alignItems: "center",
+    padding: "10px 12px",
+    borderBottom: "1px solid #f0f0f0",
+    background: "#fff",
+    gap: 8,
+    flexShrink: 0,
+  },
+  hamburger: {
+    background: "none", border: "none",
+    fontSize: 22, color: "#555", cursor: "pointer",
+    padding: "4px 8px", lineHeight: 1,
+  },
+  mobileTitle: {
+    flex: 1, fontSize: 16, fontWeight: 600, color: "#333",
+    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const,
+  },
+  mobileNewBtn: {
+    background: "none", border: "none",
+    fontSize: 24, color: "#667eea", cursor: "pointer",
+    padding: "4px 8px", lineHeight: 1, fontWeight: 300,
+  },
 };
