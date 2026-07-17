@@ -11,7 +11,7 @@ import shutil
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from uuid import uuid4
 
 from common.agent_framework.message_store.store import MessageStore
@@ -21,6 +21,15 @@ from .app_registry import AppManifest
 
 _store: Optional[MessageStore] = None
 _lock = threading.RLock()
+
+
+def _json_safe(obj: Any) -> Any:
+    """把可能含非 JSON 可序列化对象(如 ToolSchema)的结构规整为纯 JSON 类型。
+
+    Agent 事件的 to_dict() 在使用 dynamic skill(load_skill) 时可能夹带
+    ToolSchema 等对象,直接落盘会触发 json.dumps 报错并使 round 无法完成。
+    """
+    return json.loads(json.dumps(obj, ensure_ascii=False, default=str))
 
 
 def get_store() -> MessageStore:
@@ -155,8 +164,16 @@ def update_chat_session_title(session_id: str, title: str) -> None:
         store._set_metadata(session_id, meta)
 
 
-def get_round_debug(session_id: str, round_idx: int) -> Optional[Dict[str, Any]]:
-    """获取某轮对话的调试信息: 输入历史(含 trajectory) + 用户输入 + 轨迹。"""
+def get_round_debug(
+    session_id: str,
+    round_idx: int,
+    tool_whitelist: Optional[Set[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """获取某轮对话的调试信息: 输入历史(含白名单内 tool call/result) + 用户输入 + 轨迹。
+
+    input_history 使用与实际传给 agent 相同的富历史格式(含 tool_calls / tool role)，
+    以便 debug 面板能真实反映 agent 看到的上下文。
+    """
     store = get_store()
     with _lock:
         rnd = store.get_round(session_id, round_idx)
@@ -168,16 +185,17 @@ def get_round_debug(session_id: str, round_idx: int) -> Optional[Dict[str, Any]]
     for r in all_rounds:
         if r.round_idx >= round_idx:
             break
-        source = "chat"
-        if r.user_content:
-            source = r.user_content[0].get("source", "chat")
         user_text = _content_to_text(r.user_content)
         if user_text:
-            input_history.append({"role": "user", "content": user_text, "source": source})
-        if r.ai_content:
+            input_history.append({"role": "user", "content": user_text})
+        if r.trajectory:
+            input_history.extend(
+                _trajectory_to_messages(r.trajectory, tool_whitelist=tool_whitelist)
+            )
+        elif r.ai_content:
             ai_text = _content_to_text(r.ai_content)
             if ai_text:
-                input_history.append({"role": "assistant", "content": ai_text, "source": source})
+                input_history.append({"role": "assistant", "content": ai_text})
 
     return {
         "round_idx": round_idx,
@@ -289,6 +307,27 @@ def start_round(session_id: str, user_text: str, source: str = "chat") -> int:
         )
 
 
+def ensure_conversation_session(conversation_id: str, username: str = "dev") -> None:
+    """确保对话对应的 session 存在（满足写入 round 时的外键约束）。
+
+    conversation_id 直接作为底层 session_id 使用。
+    """
+    store = get_store()
+    with _lock:
+        if store.get_session(conversation_id) is None:
+            store.create_session(username, session_id=conversation_id)
+
+
+def start_round_rich(session_id: str, user_text: str, source: str = "chat") -> int:
+    """开启一轮对话（富历史/轨迹场景），返回 round idx。"""
+    store = get_store()
+    with _lock:
+        return store.start_round(
+            session_id,
+            [{"type": "text", "content": user_text, "source": source}],
+        )
+
+
 def complete_round(
     session_id: str,
     round_idx: int,
@@ -296,22 +335,29 @@ def complete_round(
     trajectory: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     store = get_store()
+    safe_trajectory = _json_safe(trajectory) if trajectory else None
     with _lock:
         store.complete_round(
             session_id,
             round_idx,
             [{"type": "text", "content": ai_text}],
-            trajectory=trajectory,
+            trajectory=safe_trajectory,
         )
 
 
-def load_history_rich(session_id: str) -> List[Dict[str, Any]]:
+def load_history_rich(
+    session_id: str,
+    tool_whitelist: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
     """把已完成的 round 转成标准 LLM API 消息格式，含 tool call/result。
 
     返回的消息列表包含三种角色:
     - {"role": "user", "content": "..."}
     - {"role": "assistant", "content": "...", "tool_calls": [{"id":..,"name":..,"arguments":..}]}
     - {"role": "tool", "tool_call_id": "...", "name": "...", "content": "..."}
+
+    tool_whitelist 为 None 时保留全部 tool call/result;否则只保留 tool_name 命中
+    白名单的 tool call/result(call 与 result 一致过滤,保持配对)。
     """
     store = get_store()
     with _lock:
@@ -322,7 +368,9 @@ def load_history_rich(session_id: str) -> List[Dict[str, Any]]:
         if user_text:
             history.append({"role": "user", "content": user_text})
         if rnd.trajectory:
-            history.extend(_trajectory_to_messages(rnd.trajectory))
+            history.extend(
+                _trajectory_to_messages(rnd.trajectory, tool_whitelist=tool_whitelist)
+            )
         elif rnd.ai_content:
             ai_text = _content_to_text(rnd.ai_content)
             if ai_text:
@@ -330,15 +378,24 @@ def load_history_rich(session_id: str) -> List[Dict[str, Any]]:
     return history
 
 
-def _trajectory_to_messages(trajectory: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _trajectory_to_messages(
+    trajectory: List[Dict[str, Any]],
+    tool_whitelist: Optional[Set[str]] = None,
+) -> List[Dict[str, Any]]:
     """从 trajectory 重建标准 LLM API 格式的 assistant / tool 消息序列。
 
     逻辑与 DefaultContextStrategy._process_events() 一致:
     reasoning event 累积 text + tool_calls，遇到 tool_result 时先 flush assistant 再追加 tool。
+
+    tool_whitelist 为 None 时保留全部 tool call/result;否则只保留命中白名单的
+    tool_name 对应的 call 与 result(两侧一致过滤,保证 tool_call 与 tool 消息配对)。
     """
     messages: List[Dict[str, Any]] = []
     pending_text: Optional[str] = None
     pending_tool_calls: List[Dict[str, Any]] = []
+
+    def _allowed(tool_name: str) -> bool:
+        return tool_whitelist is None or tool_name in tool_whitelist
 
     def _flush():
         nonlocal pending_text, pending_tool_calls
@@ -346,7 +403,11 @@ def _trajectory_to_messages(trajectory: List[Dict[str, Any]]) -> List[Dict[str, 
             msg: Dict[str, Any] = {"role": "assistant", "content": pending_text or ""}
             if pending_tool_calls:
                 msg["tool_calls"] = pending_tool_calls
-            messages.append(msg)
+                messages.append(msg)
+            elif messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
+                messages[-1]["content"] = (messages[-1]["content"] + "\n" + (pending_text or "")).strip()
+            else:
+                messages.append(msg)
             pending_text = None
             pending_tool_calls = []
 
@@ -362,6 +423,8 @@ def _trajectory_to_messages(trajectory: List[Dict[str, Any]]) -> List[Dict[str, 
                     if t:
                         texts.append(t)
                 elif btype == "tool_call":
+                    if not _allowed(block.get("tool_name", "")):
+                        continue
                     pending_tool_calls.append({
                         "id": block.get("call_id") or "",
                         "name": block.get("tool_name", ""),
@@ -374,6 +437,8 @@ def _trajectory_to_messages(trajectory: List[Dict[str, Any]]) -> List[Dict[str, 
             _flush()
             for block in ev.get("content", []):
                 if block.get("type") == "tool_result":
+                    if not _allowed(block.get("tool_name", "")):
+                        continue
                     result = block.get("result", "")
                     if block.get("is_error") and block.get("error_message"):
                         result = f"Error: {block['error_message']}"

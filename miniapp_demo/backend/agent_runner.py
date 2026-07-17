@@ -64,6 +64,7 @@ class _CwdBashExecutor:
     def __init__(self, cwd: str = ".", store_dir: str = ""):
         self._cwd = cwd
         self._store_dir = store_dir
+        self.active_skill_cwd: Optional[str] = None
 
     async def execute(self, command: str, timeout: float) -> BashResult:
         with script_metadata.result_file() as result_path:
@@ -72,11 +73,12 @@ class _CwdBashExecutor:
                 env["MINIAPP_STORE"] = self._store_dir
             env["MINIAPP_RESULT_PATH"] = str(result_path)
             _with_pythonpath(env, _script_sdk_path())
+            cwd = self.active_skill_cwd or self._cwd
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=self._cwd,
+                cwd=cwd,
                 env=env,
                 **_subprocess_group_kwargs(),
             )
@@ -106,6 +108,14 @@ class _CwdBashExecutor:
 
 class MiniAppBashTool(BashTool):
     """BashTool wrapper that keeps trusted MiniApp metadata out of model text."""
+
+    @property
+    def description(self) -> str:
+        cwd = self._executor.active_skill_cwd or self._executor._cwd
+        return (
+            f"在容器内执行 bash 命令。当前工作目录: {cwd}\n"
+            "执行 python 脚本时必须用 python3 命令（如 python3 fortune-teller/scripts/xxx.py），不要直接执行脚本文件。"
+        )
 
     async def execute(self, parameters, context=None) -> ToolResult:
         command = parameters.get("command", "")
@@ -275,9 +285,26 @@ class _MiniappContextStrategy(DefaultContextStrategy):
 
 
 class _AgentSignalHook(DefaultHook):
-    """Honor trusted agentSignal metadata from the MiniApp Bash tool."""
+    """Honor trusted agentSignal metadata from the MiniApp Bash tool.
+
+    Also tracks load_skill to update the bash executor's working directory
+    so that skill scripts (e.g. scripts/show_question.py) resolve correctly.
+    """
+
+    def __init__(self, executor: Optional["_CwdBashExecutor"] = None, apps_dir: str = ""):
+        self._executor = executor
+        self._apps_dir = apps_dir
 
     def after_tool_execution(self, ctx: HookContext) -> HookResult:
+        if ctx.current_tool_name == "load_skill" and self._executor and self._apps_dir:
+            result = ctx.current_tool_result
+            if result and result.success:
+                skill_name = (result.parameters or {}).get("skill_name", "")
+                if skill_name:
+                    skill_dir = str(Path(self._apps_dir) / skill_name)
+                    if Path(skill_dir).is_dir():
+                        self._executor.active_skill_cwd = skill_dir
+
         if ctx.current_tool_name != "bash" or not ctx.current_tool_result:
             return HookResult.continue_execution()
         metadata = ctx.current_tool_result.metadata or {}

@@ -29,12 +29,12 @@ export function StandalonePage() {
     const bridge = new HostBridge(() => {});
     bridgeRef.current = bridge;
     if (appId) bridge.setApp(appId);
-    bridge.setIframe(iframeRef.current);
     return () => {
       bridge.dispose();
       if (bridgeRef.current === bridge) bridgeRef.current = null;
     };
   }, [appId]);
+
 
 
   useEffect(() => {
@@ -57,8 +57,14 @@ export function StandalonePage() {
     let file = entries?.default || "index.html";
     if (device === "mobile" && entries?.mobile) file = entries.mobile;
     if (device === "desktop" && entries?.desktop) file = entries.desktop;
-    return `/api/apps/${appId}/ui/${file}?device=${device}`;
+    return `/api/apps/${appId}/ui/${file}?device=${device}&_nocache=1`;
   }, [appId, manifest, device]);
+
+  useEffect(() => {
+    if (bridgeRef.current && iframeRef.current) {
+      bridgeRef.current.setIframe(iframeRef.current);
+    }
+  }, [manifest]);
 
   if (!appId) return null;
 

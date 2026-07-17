@@ -174,13 +174,14 @@
     /* ---- 下拉历史 ---- */
     .hist-handle {
       position: fixed; top: 0; left: 0; right: 0; z-index: 8;
-      height: 28px;
+      height: 36px;
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-      cursor: grab; user-select: none; touch-action: none;
-      background: linear-gradient(180deg, rgba(10,7,24,0.55) 0%, transparent 100%);
+      cursor: pointer; user-select: none; touch-action: none;
+      background: linear-gradient(180deg, rgba(10,7,24,0.7) 0%, transparent 100%);
     }
+    .hist-handle:hover { background: linear-gradient(180deg, rgba(10,7,24,0.9) 0%, transparent 100%); }
     .hist-handle-bar { width: 32px; height: 3px; border-radius: 2px; background: rgba(201,182,255,0.22); }
-    .hist-handle-text { font-size: 9px; color: rgba(154,147,199,0.45); letter-spacing: .12em; }
+    .hist-handle-text { font-size: 11px; color: rgba(154,147,199,0.6); letter-spacing: .12em; }
     .hist-indicator {
       position: fixed; top: 28px; left: 0; right: 0; z-index: 8;
       display: flex; align-items: center; justify-content: center;
@@ -339,6 +340,7 @@
     var toastTimer;
     var currentPhase = 'idle'; // 'idle' | 'question' | 'result'
     var currentQuestion = null;
+    var currentTheme = null;
 
     function toast(msg) {
       toastEl.textContent = msg; toastEl.classList.add('on');
@@ -477,6 +479,7 @@
 
     function resetToIdle() {
       currentQuestion = null;
+      currentTheme = null;
       oracle.classList.remove('show'); oracle.textContent = '';
       hint.classList.remove('gone');
       hint.textContent = '今夜星象微动 · 说说最近发生了什么';
@@ -506,15 +509,52 @@
     }
 
     miniapp.onUiUpdate(function (e) {
+      console.log('[fortune-teller] onUiUpdate:', e);
       var sc = (e.payload && e.payload.structuredContent) || {};
       var phase = sc.phase;
       hideLoading();
-      if (phase === 'theme_enter' && sc.background) {
+      _uiUpdateReceived = true;
+      if (_textOracleStarted) {
+        endOracle();
+        _textOracleStarted = false;
+      }
+      if (phase === 'narration' && sc.text) {
+        if (sc.theme) currentTheme = sc.theme;
+        document.getElementById('stage').classList.remove('has-question');
+        showView('idle');
+        beginOracle();
+        appendOracle(String(sc.text));
+        endOracle();
+      } else if (phase === 'theme_enter' && sc.background) {
+        if (sc.theme) currentTheme = sc.theme;
         applyThemeBg(sc.background);
       } else if (phase === 'question' && sc.question) {
         renderQuestion(sc.question);
       } else if (phase === 'result' && sc.result) {
         renderResult(sc.result);
+      }
+    });
+
+    // ========== trajectory text fallback: agent 纯文字回复在 widget 里展示为 oracle ==========
+    var _textOracleStarted = false;
+    var _uiUpdateReceived = false;
+    miniapp.onTrajectory(function (e) {
+      console.log('[fortune-teller] onTrajectory:', e.type, e);
+      var type = e.type;
+      if (type === 'text' && !_uiUpdateReceived) {
+        var delta = (e.payload && e.payload.delta) || '';
+        if (!_textOracleStarted) {
+          _textOracleStarted = true;
+          hideLoading();
+          document.getElementById('stage').classList.remove('has-question');
+          showView('idle');
+          beginOracle();
+        }
+        appendOracle(delta);
+      } else if (type === 'done') {
+        if (_textOracleStarted) { endOracle(); }
+        _textOracleStarted = false;
+        _uiUpdateReceived = false;
       }
     });
 
@@ -528,28 +568,14 @@
       busy = true;
       input.value = '';
 
-      var oracleStarted = false;
-      var got = false;
       document.getElementById('stage').classList.remove('has-question');
       showView('idle');
       showLoading();
 
       miniapp.agentAction(text, { phase: currentPhase }, {
-        onTrajectory: function (e) {
-          if (e.type === 'text' && e.payload && e.payload.delta) {
-            got = true;
-            if (!oracleStarted) {
-              oracleStarted = true;
-              hideLoading();
-              beginOracle();
-            }
-            appendOracle(e.payload.delta);
-          }
-        },
         onDone: function () {
           busy = false;
           hideLoading();
-          if (oracleStarted) { endOracle(); if (!got) endOracle(); }
         }
       });
     }
@@ -618,11 +644,33 @@
     refreshIcon();
     showView('idle');
 
+    // 如果 URL 携带了初始 narration（打开卦台时的欢迎语），立即展示
+    try {
+      var _urlParams = new URLSearchParams(window.location.search);
+      var _initNarration = _urlParams.get('narration');
+      if (_initNarration) {
+        beginOracle();
+        appendOracle(_initNarration);
+        endOracle();
+      }
+    } catch (e) {}
+
     miniapp.setEnv(function () {
-      return { app: 'fortune-teller', phase: currentPhase };
+      var env = { app: 'fortune-teller', phase: currentPhase };
+      if (currentTheme) env.theme = currentTheme;
+      if (currentQuestion && currentQuestion.text) env.currentQuestion = currentQuestion.text;
+      return env;
     });
 
+    if (miniapp.onLoading) {
+      miniapp.onLoading(function (loading) {
+        if (loading) showLoading();
+        else hideLoading();
+      });
+    }
+
     miniapp.onInit(function (message) {
+      console.log('[fortune-teller] onInit:', message);
       ask(message);
     });
 
@@ -707,26 +755,9 @@
       histIndicator.style.opacity = '0';
     });
 
-    histHandle.addEventListener('mousedown', function (e) {
-      if (histOpen) return;
-      histTouchStart = { y: e.clientY, active: true };
-      function onMove(ev) {
-        if (!histTouchStart.active) return;
-        var dy = ev.clientY - histTouchStart.y;
-        if (dy > 0) { histPullY = Math.min(dy * 0.5, 140); histUpdateIndicator(); }
-      }
-      function onUp() {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        if (!histTouchStart.active) return;
-        histTouchStart.active = false;
-        if (histPullY >= HIST_THRESHOLD) openHistory();
-        histPullY = 0;
-        histIndicator.style.opacity = '0';
-      }
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    });
+    histHandle.onclick = function () {
+      if (!histOpen) openHistory();
+    };
   </script>
 </body>
 </html>

@@ -5,7 +5,7 @@ import { NameInput } from "../components/NameInput";
 import { SessionSidebar } from "../components/SessionSidebar";
 import { ChatMessages, type ChatMsg, type DebugEvent } from "../components/ChatMessages";
 import { ChatInput } from "../components/ChatInput";
-import { MiniappOverlay } from "../components/MiniappOverlay";
+import { MiniappOverlay, type MiniappOverlayHandle } from "../components/MiniappOverlay";
 import { ChatDebugModal } from "../components/ChatDebugModal";
 import { runChatAction } from "./chatTransport";
 import type { DownFrame } from "../types";
@@ -35,7 +35,7 @@ export function ChatPage() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [streaming, setStreaming] = useState(false);
-  const [overlay, setOverlay] = useState<{ appId: string; sessionId: string } | null>(null);
+  const [overlay, setOverlay] = useState<{ appId: string; sessionId: string; narration?: string } | null>(null);
   const [debugMsg, setDebugMsg] = useState<ChatMsg | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -43,6 +43,11 @@ export function ChatPage() {
   const streamEvents = useRef<DebugEvent[]>([]);
   const requestIdRef = useRef("");
   const chatAbortRef = useRef<AbortController | null>(null);
+  const activeSessionRef = useRef(activeSessionId);
+  activeSessionRef.current = activeSessionId;
+  const overlayRef = useRef(overlay);
+  overlayRef.current = overlay;
+  const overlayHandleRef = useRef<MiniappOverlayHandle | null>(null);
 
   const handleChatEvent = useCallback((frame: DownFrame) => {
     if (frame.data_type !== "chat.event") return;
@@ -83,18 +88,29 @@ export function ChatPage() {
       }
     };
 
-    if (ev.type === "text") {
+    if (ev.type === "ui_update") {
+      const payload = ev.payload as Record<string, unknown> | undefined;
+      const sc = payload?.structuredContent as Record<string, unknown> | undefined;
+      const isOpen = sc?.command === "open" || sc?.state === "open" || sc?.mode === "open";
+      if (isOpen) {
+        const skillId = (sc!.skillId as string) || (sc!.type as string) || "fortune-teller";
+        const narration = (sc!.narration as string) || (sc!.subtitle as string) || "";
+        setOverlay({ appId: skillId, sessionId: activeSessionRef.current || "", narration });
+      } else if (sc?.phase && !overlayRef.current) {
+        setOverlay({ appId: "fortune-teller", sessionId: activeSessionRef.current || "" });
+      }
+      // Forward ui_update to overlay iframe as app.event so SDK processes it
+      if (overlayHandleRef.current) {
+        const appFrame = { ...frame, data_type: "app.event" as const };
+        overlayHandleRef.current.injectDown(appFrame);
+      }
+    } else if (ev.type === "text") {
       const delta = (ev.payload?.delta as string) || "";
       ensureBuf();
       streamBuf.current!.content += delta;
       updateStreamMsg();
-    } else if (ev.type === "tool_call" && ev.payload?.name === "show_miniapp_entry") {
-      const args = ev.payload?.arguments as Record<string, unknown> | undefined;
-      const appId = (args?.app_id as string) || "";
-      if (appId) {
-        ensureBuf();
-        streamBuf.current!.loadedSkill = appId;
-        updateStreamMsg();
+      if (overlayHandleRef.current) {
+        overlayHandleRef.current.injectDown({ ...frame, data_type: "app.event" as const });
       }
     } else if (ev.type === "done") {
       if (streamBuf.current) {
@@ -105,6 +121,9 @@ export function ChatPage() {
       streamBuf.current = null;
       streamEvents.current = [];
       setStreaming(false);
+      if (overlayHandleRef.current) {
+        overlayHandleRef.current.injectDown({ ...frame, data_type: "app.event" as const });
+      }
     }
   }, []);
 
@@ -153,6 +172,7 @@ export function ChatPage() {
   const selectSession = useCallback(
     (id: string) => {
       chatAbortRef.current?.abort();
+      setOverlay(null);
       setActiveSessionId(id);
       loadHistory(id);
     },
@@ -161,6 +181,7 @@ export function ChatPage() {
 
   const createSession = useCallback(async () => {
     if (!username) return;
+    setOverlay(null);
     const res = await api.createChatSession(username, "新对话");
     await refreshSessions();
     setActiveSessionId(res.session_id);
@@ -246,6 +267,13 @@ export function ChatPage() {
     [activeSessionId],
   );
 
+  const handleOpenApp = useCallback(
+    (appId: string) => {
+      setOverlay({ appId, sessionId: "" });
+    },
+    [],
+  );
+
   if (!username) {
     return <NameInput onSubmit={handleLogin} />;
   }
@@ -306,7 +334,7 @@ export function ChatPage() {
               onSkillClick={handleSkillClick}
               onDebug={setDebugMsg}
             />
-            <ChatInput onSend={sendMessage} disabled={streaming} isMobile={isMobile} />
+            <ChatInput onSend={sendMessage} disabled={streaming} isMobile={isMobile} onOpenApp={handleOpenApp} />
           </>
         ) : (
           <div style={styles.placeholder}>
@@ -317,10 +345,27 @@ export function ChatPage() {
           </div>
         )}
       </div>
-      {overlay && (
+      {overlay && !isMobile && (
         <MiniappOverlay
+          ref={overlayHandleRef}
           appId={overlay.appId}
           sessionId={overlay.sessionId}
+          mode="panel"
+          narration={overlay.narration}
+          onClose={async () => {
+            await api.exitApp(overlay.appId, overlay.sessionId).catch(() => {});
+            setOverlay(null);
+            if (activeSessionId) loadHistory(activeSessionId);
+          }}
+        />
+      )}
+      {overlay && isMobile && (
+        <MiniappOverlay
+          ref={overlayHandleRef}
+          appId={overlay.appId}
+          sessionId={overlay.sessionId}
+          mode="fullscreen"
+          narration={overlay.narration}
           onClose={async () => {
             await api.exitApp(overlay.appId, overlay.sessionId).catch(() => {});
             setOverlay(null);

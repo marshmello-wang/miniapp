@@ -10,7 +10,6 @@ export interface ChatMsg {
   id: string;
   role: "user" | "assistant" | "miniapp";
   content: string;
-  loadedSkill?: string;
   /** 后端 round 索引,用于拉取完整 debug 信息 */
   roundIdx?: number;
   /** 流式收集的事件轨迹 */
@@ -121,18 +120,6 @@ export function ChatMessages({ messages, streaming, isMobile, onSkillClick, onDe
               )}
             </div>
             <div style={styles.text}>{msg.content}</div>
-            {msg.loadedSkill && (
-              <div
-                style={styles.skillCard}
-                onClick={() => onSkillClick?.(msg.loadedSkill!)}
-              >
-                <div style={styles.skillIcon}>📱</div>
-                <div>
-                  <div style={styles.skillName}>{msg.loadedSkill}</div>
-                  <div style={styles.skillHint}>点击打开小程序</div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
         ),
@@ -217,17 +204,6 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#bbb",
     animation: "dotPulse 1s infinite",
   },
-  skillCard: {
-    display: "flex", alignItems: "center", gap: 10,
-    marginTop: 10, padding: "10px 14px",
-    background: "#fff", borderRadius: 12,
-    border: "1px solid #e8e8f0",
-    cursor: "pointer",
-    transition: "box-shadow 0.15s",
-  },
-  skillIcon: { fontSize: 28 },
-  skillName: { fontSize: 14, fontWeight: 600, color: "#333" },
-  skillHint: { fontSize: 12, color: "#999", marginTop: 2 },
   miniappRow: {
     display: "flex", flexDirection: "column" as const, alignItems: "flex-start",
     padding: "8px 0",

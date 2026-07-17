@@ -87,4 +87,4 @@ def serve_ui(app_id: str, asset_path: str):
     target = (ui_root / asset_path).resolve()
     if not str(target).startswith(str(ui_root)) or not target.is_file():
         raise HTTPException(404, "asset not found")
-    return FileResponse(str(target))
+    return FileResponse(str(target), headers={"Cache-Control": "no-cache, no-store, must-revalidate"})

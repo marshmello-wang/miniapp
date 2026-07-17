@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from .. import stores
 from ..chat_agent_runner import get_chat_system_prompt
+from ..chat_engine import _HISTORY_TOOL_WHITELIST
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -32,7 +33,9 @@ def get_history(session_id: str):
 
 @router.get("/sessions/{session_id}/rounds/{round_idx}/debug")
 def get_round_debug(session_id: str, round_idx: int):
-    debug = stores.get_round_debug(session_id, round_idx)
+    debug = stores.get_round_debug(
+        session_id, round_idx, tool_whitelist=_HISTORY_TOOL_WHITELIST
+    )
     if debug is None:
         raise HTTPException(404, "round not found")
     debug["system_prompt"] = get_chat_system_prompt()

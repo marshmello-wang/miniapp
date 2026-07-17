@@ -100,6 +100,8 @@ def seed_bundled_apps() -> None:
         if not src.is_dir():
             continue
         dst = APPS_DIR / src.name
+        if dst.is_symlink():
+            continue
         if dst.exists():
             shutil.rmtree(dst)
         shutil.copytree(src, dst)

@@ -21,7 +21,8 @@ def main():
     try:
         args = json.loads(raw)
     except json.JSONDecodeError:
-        print("错误：MINIAPP_ARGS 不是有效 JSON", file=sys.stderr)
+        print("错误：MINIAPP_ARGS 不是有效 JSON。正确用法：", file=sys.stderr)
+        print("  MINIAPP_ARGS='{\"text\":\"问题内容\",\"type\":\"choice\",\"options\":[\"A\",\"B\"]}' python3 fortune-teller/scripts/show_question.py", file=sys.stderr)
         sys.exit(1)
 
     text = args.get("text", "")
@@ -29,7 +30,8 @@ def main():
     options = args.get("options", [])
 
     if not text:
-        print("错误：缺少题目文字", file=sys.stderr)
+        print("错误：缺少题目文字。正确用法：", file=sys.stderr)
+        print("  MINIAPP_ARGS='{\"text\":\"问题内容\",\"type\":\"choice\",\"options\":[\"A\",\"B\"]}' python3 fortune-teller/scripts/show_question.py", file=sys.stderr)
         sys.exit(1)
 
     question = {

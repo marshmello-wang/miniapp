@@ -162,6 +162,14 @@ export class HostBridge {
     }
   }
 
+  /** 从外部注入一个 DownFrame 到 iframe（用于 chat 流转发 ui_update）。 */
+  injectDown(frame: DownFrame) {
+    const target = this.iframe?.contentWindow;
+    if (target) {
+      this.deliver(frame, target);
+    }
+  }
+
   private deliver(frame: DownFrame, target: WindowProxy) {
     this.debug("down", frame as unknown as DebugPayload);
     target.postMessage({ source: "miniapp-host", frame }, "*");
